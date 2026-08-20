@@ -6,3 +6,5 @@ azure-identity
 azure-ai-projects
 azure-ai-documentintelligence
 pydantic
+pymupdf
+pillow
