@@ -1,11 +1,13 @@
 import os
 import re
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
+
+from app.storage.document_io import open_document_stream
+from app.storage.document_storage import DocumentStorage
 
 
 load_dotenv()
@@ -21,7 +23,12 @@ class PurchaseOrderExtractor:
     This is NOT the canonical PurchaseOrder model.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        storage: DocumentStorage | None = None,
+    ):
+        self.storage = storage
+
         endpoint = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
         api_key = os.getenv("DOCUMENT_INTELLIGENCE_API_KEY")
 
@@ -48,30 +55,22 @@ class PurchaseOrderExtractor:
         Extract Purchase Order information.
         """
 
-        path = Path(document_path)
+        document = open_document_stream(
+            document_path,
+            storage=self.storage,
+        )
 
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Document not found: {document_path}"
-            )
-
-        if not path.is_file():
-            raise ValueError(
-                f"Document path is not a file: {document_path}"
-            )
-
-        with path.open("rb") as document:
-            poller = self.client.begin_analyze_document(
-                "prebuilt-layout",
-                body=document,
-            )
+        poller = self.client.begin_analyze_document(
+            "prebuilt-layout",
+            body=document,
+        )
 
         result = poller.result()
 
         paragraphs = result.paragraphs or []
 
         return {
-            "document_path": str(path),
+            "document_path": document_path,
 
             "po_number": self._extract_named_value(
                 paragraphs,

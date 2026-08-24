@@ -1,8 +1,12 @@
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 
 import fitz  # PyMuPDF
 from PIL import Image
+
+from app.storage.document_io import read_document_bytes
+from app.storage.document_storage import DocumentStorage
+from app.storage.locator import locator_extension
 
 
 class DocumentSnip:
@@ -10,7 +14,7 @@ class DocumentSnip:
     Creates visual evidence snippets from PDF documents.
 
     Input:
-        - PDF path
+        - document locator (local path or Azure blob URI)
         - page number
         - Azure Document Intelligence polygon
 
@@ -18,11 +22,17 @@ class DocumentSnip:
         - PNG image containing the relevant document region
     """
 
+    def __init__(
+        self,
+        storage: DocumentStorage | None = None,
+    ):
+        self.storage = storage
+
     def create_snip(
         self,
         document_path: str,
         page_number: int,
-        polygon: List[Dict[str, float]],
+        polygon: List[dict[str, float]],
         output_path: str,
         padding: float = 0.15,
     ) -> str:
@@ -34,17 +44,10 @@ class DocumentSnip:
         POC documents.
         """
 
-        path = Path(document_path)
-
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Document not found: {document_path}"
-            )
-
-        if not path.is_file():
-            raise ValueError(
-                f"Document path is not a file: {document_path}"
-            )
+        payload = read_document_bytes(
+            document_path,
+            storage=self.storage,
+        )
 
         if page_number < 1:
             raise ValueError(
@@ -56,7 +59,12 @@ class DocumentSnip:
                 "polygon cannot be empty"
             )
 
-        document = fitz.open(str(path))
+        filetype = locator_extension(document_path).lstrip(".") or "pdf"
+
+        document = fitz.open(
+            stream=payload,
+            filetype=filetype,
+        )
 
         try:
             if page_number > len(document):

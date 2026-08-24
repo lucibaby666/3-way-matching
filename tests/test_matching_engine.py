@@ -158,6 +158,30 @@ def test_matching_engine_detects_relationship_exception():
 
 
 # ============================================================
+# NEGATIVE — MISSING LINE
+# ============================================================
+
+def test_matching_engine_detects_missing_invoice_line():
+    contract, purchase_order, invoice = create_documents()
+
+    invoice.line_items = []
+
+    result = MatchingEngine().match(
+        contract,
+        purchase_order,
+        invoice,
+    )
+
+    assert result.status == "EXCEPTION"
+    assert len(result.exceptions) == 1
+
+    exception = result.exceptions[0]
+
+    assert exception.type == "MISSING_LINE"
+    assert exception.item_code == "ITM-001"
+
+
+# ============================================================
 # NEGATIVE — MULTIPLE EXCEPTIONS
 # ============================================================
 

@@ -3,17 +3,13 @@ import json
 from datetime import datetime, timezone
 
 from app.agents.matching_agent import create_matching_agent
-from app.capabilities.contract_extractor import ContractExtractor
-from app.capabilities.document_intake import DocumentIntake
+from app.capabilities.document_set_loader import (
+    DocumentSetLoader,
+)
 from app.capabilities.evidence_generator import EvidenceGenerator
 from app.capabilities.hitl_case_service import HITLCaseService
 from app.capabilities.hitl_decision import HITLDecisionCapability
 from app.capabilities.hitl_routing import HITLRoutingCapability
-from app.capabilities.invoice_extractor import InvoiceExtractor
-from app.capabilities.purchase_order_extractor import (
-    PurchaseOrderExtractor,
-)
-from app.canonicalization.canonicalizer import Canonicalizer
 from app.matching.matching_engine import MatchingEngine
 from app.models.hitl_decision import (
     HITLDecision,
@@ -27,8 +23,6 @@ from app.repositories.in_memory_hitl_case_repository import (
 # ============================================================
 # DEMO CONFIGURATION
 # ============================================================
-
-DEMO_DISCREPANCY = True
 
 # Keep evidence permanently so it can be opened after the demo.
 EVIDENCE_OUTPUT_DIR = "outputs/evidence_demo"
@@ -50,40 +44,20 @@ async def main():
 
     print("\n[1] DOCUMENT INTAKE")
 
-    intake = DocumentIntake()
+    loaded = DocumentSetLoader().load()
+    documents = loaded["documents"]
+    contracts = loaded["contracts"]
+    purchase_orders = loaded["purchase_orders"]
+    invoices = loaded["invoices"]
 
-    documents = intake.discover_documents()
+    for contract_doc in documents["contracts"]:
+        print(f"Contract : {contract_doc['filename']}")
 
-    if not documents.get("contracts"):
-        raise RuntimeError(
-            "No contract document found."
-        )
+    for po_doc in documents["purchase_orders"]:
+        print(f"PO       : {po_doc['filename']}")
 
-    if not documents.get("purchase_orders"):
-        raise RuntimeError(
-            "No purchase order document found."
-        )
-
-    if not documents.get("invoices"):
-        raise RuntimeError(
-            "No invoice document found."
-        )
-
-    contract_doc = documents["contracts"][0]
-    po_doc = documents["purchase_orders"][0]
-    invoice_doc = documents["invoices"][0]
-
-    print(
-        f"Contract : {contract_doc['filename']}"
-    )
-
-    print(
-        f"PO       : {po_doc['filename']}"
-    )
-
-    print(
-        f"Invoice  : {invoice_doc['filename']}"
-    )
+    for invoice_doc in documents["invoices"]:
+        print(f"Invoice  : {invoice_doc['filename']}")
 
     # ========================================================
     # 2. DOCUMENT EXTRACTION
@@ -91,42 +65,23 @@ async def main():
 
     print("\n[2] DOCUMENT EXTRACTION")
 
-    contract_extractor = ContractExtractor()
-    po_extractor = PurchaseOrderExtractor()
-    invoice_extractor = InvoiceExtractor()
-
-    contract_data = (
-        contract_extractor.extract_contract(
-            contract_doc["path"]
+    for contract_data in loaded["extracted"]["contracts"]:
+        print(
+            "Contract extracted:",
+            contract_data["contract_number"]["value"],
         )
-    )
 
-    po_data = (
-        po_extractor.extract_purchase_order(
-            po_doc["path"]
+    for po_data in loaded["extracted"]["purchase_orders"]:
+        print(
+            "PO extracted:",
+            po_data["po_number"]["value"],
         )
-    )
 
-    invoice_data = (
-        invoice_extractor.extract_invoice(
-            invoice_doc["path"]
+    for invoice_data in loaded["extracted"]["invoices"]:
+        print(
+            "Invoice extracted:",
+            invoice_data["invoice_number"]["value"],
         )
-    )
-
-    print(
-        "Contract extracted:",
-        contract_data["contract_number"]["value"],
-    )
-
-    print(
-        "PO extracted:",
-        po_data["po_number"]["value"],
-    )
-
-    print(
-        "Invoice extracted:",
-        invoice_data["invoice_number"]["value"],
-    )
 
     # ========================================================
     # 3. CANONICALIZATION
@@ -134,54 +89,17 @@ async def main():
 
     print("\n[3] CANONICALIZATION")
 
-    canonicalizer = Canonicalizer()
+    for contract in contracts:
+        print("Contract model :", contract.contract_number)
+        print("Contract lines :", len(contract.line_items))
 
-    contract = canonicalizer.canonicalize_contract(
-        contract_data,
-        document_id=contract_doc["document_id"],
-    )
+    for purchase_order in purchase_orders:
+        print("PO model       :", purchase_order.po_number)
+        print("PO lines       :", len(purchase_order.line_items))
 
-    purchase_order = (
-        canonicalizer.canonicalize_purchase_order(
-            po_data,
-            document_id=po_doc["document_id"],
-        )
-    )
-
-    invoice = canonicalizer.canonicalize_invoice(
-        invoice_data,
-        document_id=invoice_doc["document_id"],
-    )
-
-    print(
-        "Contract model :",
-        contract.contract_number,
-    )
-
-    print(
-        "PO model       :",
-        purchase_order.po_number,
-    )
-
-    print(
-        "Invoice model  :",
-        invoice.invoice_number,
-    )
-
-    print(
-        "Contract lines :",
-        len(contract.line_items),
-    )
-
-    print(
-        "PO lines       :",
-        len(purchase_order.line_items),
-    )
-
-    print(
-        "Invoice lines  :",
-        len(invoice.line_items),
-    )
+    for invoice in invoices:
+        print("Invoice model  :", invoice.invoice_number)
+        print("Invoice lines  :", len(invoice.line_items))
 
     # ========================================================
     # 4. SHOW CANONICAL LINE ITEMS
@@ -189,85 +107,44 @@ async def main():
 
     print("\n[4] CANONICAL LINE ITEMS")
 
-    print("\nContract:")
+    for contract in contracts:
 
-    for line in contract.line_items:
-        print(
-            f"  {line.item_code} | "
-            f"{line.description} | "
-            f"Qty={line.quantity} | "
-            f"Price={line.unit_price}"
-        )
+        print(f"\nContract {contract.contract_number}:")
 
-    print("\nPurchase Order:")
-
-    for line in purchase_order.line_items:
-        print(
-            f"  {line.item_code} | "
-            f"{line.description} | "
-            f"Qty={line.quantity} | "
-            f"Price={line.unit_price}"
-        )
-
-    print("\nInvoice:")
-
-    for line in invoice.line_items:
-        print(
-            f"  {line.item_code} | "
-            f"{line.description} | "
-            f"Qty={line.quantity} | "
-            f"Price={line.unit_price}"
-        )
-
-    # ========================================================
-    # 5. CONTROLLED DEMO DISCREPANCY
-    # ========================================================
-
-    if DEMO_DISCREPANCY:
-
-        print(
-            "\n[DEMO] Injecting controlled "
-            "invoice discrepancy"
-        )
-
-        if not invoice.line_items:
-            raise RuntimeError(
-                "Invoice contains no line items."
+        for line in contract.line_items:
+            print(
+                f"  {line.item_code} | "
+                f"{line.description} | "
+                f"Qty={line.quantity} | "
+                f"Price={line.unit_price}"
             )
 
-        original_quantity = (
-            invoice.line_items[0].quantity
-        )
+    for purchase_order in purchase_orders:
 
-        original_price = (
-            invoice.line_items[0].unit_price
-        )
+        print(f"\nPurchase Order {purchase_order.po_number}:")
 
-        invoice.line_items[0].quantity = 110
-        invoice.line_items[0].unit_price = 260
+        for line in purchase_order.line_items:
+            print(
+                f"  {line.item_code} | "
+                f"{line.description} | "
+                f"Qty={line.quantity} | "
+                f"Price={line.unit_price}"
+            )
 
-        print(
-            f"Invoice {invoice.line_items[0].item_code} "
-            "modified for demonstration:"
-        )
+    for invoice in invoices:
 
-        print(
-            f"Quantity: {original_quantity} -> "
-            f"{invoice.line_items[0].quantity}"
-        )
+        print(f"\nInvoice {invoice.invoice_number}:")
 
-        print(
-            f"Unit Price: {original_price} -> "
-            f"{invoice.line_items[0].unit_price}"
-        )
-
-        print(
-            "\nNOTE: This is a controlled demo discrepancy. "
-            "The source documents remain unchanged."
-        )
+        for line in invoice.line_items:
+            print(
+                f"  {line.item_code} | "
+                f"{line.description} | "
+                f"Qty={line.quantity} | "
+                f"Price={line.unit_price}"
+            )
 
     # ========================================================
-    # 6. DETERMINISTIC MATCHING + WHOLE-ROW EVIDENCE
+    # 5. DETERMINISTIC MATCHING + WHOLE-ROW EVIDENCE
     # ========================================================
 
     print(
@@ -282,10 +159,10 @@ async def main():
         evidence_generator=evidence_generator
     )
 
-    deterministic_result = engine.match(
-        contract,
-        purchase_order,
-        invoice,
+    deterministic_result = engine.match_many(
+        contracts,
+        purchase_orders,
+        invoices,
     )
 
     print(

@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from app.capabilities.document_snip import DocumentSnip
+from app.storage.locator import locator_stem
 
 
 class EvidenceGenerator:
@@ -101,9 +102,9 @@ class EvidenceGenerator:
                     "Evidence reference requires polygon"
                 )
 
-            document_name = Path(
+            document_name = locator_stem(
                 document_path
-            ).stem
+            )
 
             output_path = (
                 self.output_dir
