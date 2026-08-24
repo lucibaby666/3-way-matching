@@ -3,6 +3,7 @@ fastapi
 uvicorn[standard]
 python-dotenv
 azure-identity
+azure-storage-blob
 azure-ai-projects
 azure-ai-documentintelligence
 pydantic
