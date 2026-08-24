@@ -2,17 +2,13 @@ import asyncio
 import json
 
 from app.agents.matching_agent import create_matching_agent
-from app.capabilities.contract_extractor import ContractExtractor
-from app.capabilities.document_intake import DocumentIntake
+from app.capabilities.document_set_loader import (
+    DocumentSetLoader,
+)
 from app.capabilities.evidence_generator import EvidenceGenerator
 from app.capabilities.hitl_case_service import HITLCaseService
 from app.capabilities.hitl_decision import HITLDecisionCapability
 from app.capabilities.hitl_routing import HITLRoutingCapability
-from app.capabilities.invoice_extractor import InvoiceExtractor
-from app.capabilities.purchase_order_extractor import (
-    PurchaseOrderExtractor,
-)
-from app.canonicalization.canonicalizer import Canonicalizer
 from app.matching.matching_engine import MatchingEngine
 from app.models.hitl_decision import (
     HITLDecision,

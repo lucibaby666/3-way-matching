@@ -1,9 +1,9 @@
-from pathlib import Path
 from typing import Any
 
 from app.capabilities.evidence_generator import (
     EvidenceGenerator,
 )
+from app.storage.locator import locator_stem
 
 
 class HITLEvidenceService:
@@ -56,7 +56,7 @@ class HITLEvidenceService:
             )
 
         output_name = (
-            f"{Path(document_path).stem}"
+            f"{locator_stem(document_path)}"
             f"_{item_code}"
             f"_whole_row.png"
         )
