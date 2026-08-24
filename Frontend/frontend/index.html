@@ -206,7 +206,7 @@ async function runMatching() {
 
     let uploadRes;
     try {
-      uploadRes = await fetch(`${API}/api/upload`, {
+      uploadRes = await fetch(`${API}/api/uploads`, {
         method: 'POST',
         body: form,
       });
@@ -217,11 +217,28 @@ async function runMatching() {
       const err = await uploadRes.json().catch(() => ({}));
       throw new Error(err.detail || 'Upload failed');
     }
+    const upload = await uploadRes.json();
 
     const inject = document.getElementById('chkDiscrepancy').checked;
 
+    let matchRes;
+    try {
+      matchRes = await fetch(`${API}/api/matches`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({upload_id: upload.id, inject_discrepancy: inject}),
+      });
+    } catch (fetchErr) {
+      throw new Error('Failed to fetch: ' + fetchErr.message);
+    }
+    if (!matchRes.ok) {
+      const err = await matchRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to start matching');
+    }
+    const match = await matchRes.json();
+
     await new Promise((resolve, reject) => {
-      const url = `${API}/api/match/stream?inject_discrepancy=${inject}`;
+      const url = `${API}${match.events_url}`;
       eventSource = new EventSource(url);
       let finished = false;
 
@@ -367,7 +384,7 @@ async function submitDecision(decision) {
   const caseId = lastResult.hitl_case.case_id;
 
   try {
-    const res = await fetch(`${API}/api/cases/${caseId}/decide`, {
+    const res = await fetch(`${API}/api/cases/${caseId}/decisions`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({decision, reviewer: 'web-reviewer', comment: `${decision} via web UI`}),

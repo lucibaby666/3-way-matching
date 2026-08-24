@@ -1,0 +1,255 @@
+import asyncio
+import json
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from app.api.pipeline import start_match_run
+from app.api.runtime import (
+    MatchRun,
+    UploadSession,
+    hitl_service,
+    match_runs,
+    upload_sessions,
+)
+from app.models.hitl_decision import HITLDecision, HITLDecisionType
+from app.storage.in_memory_document_storage import (
+    InMemoryDocumentStorage,
+)
+
+router = APIRouter(prefix="/api")
+
+UPLOAD_FIELDS = {
+    "contract": "contracts",
+    "purchase_order": "purchase_orders",
+    "invoice": "invoices",
+}
+
+
+class CreateMatchRequest(BaseModel):
+    upload_id: str
+    inject_discrepancy: bool = False
+
+
+class CreateDecisionRequest(BaseModel):
+    decision: str = Field(min_length=1)
+    reviewer: str = Field(min_length=1)
+    comment: str = ""
+
+
+# ============================================================
+# UPLOADS
+# ============================================================
+
+
+@router.post("/uploads", status_code=201)
+async def create_upload(
+    contract: UploadFile,
+    purchase_order: UploadFile,
+    invoice: UploadFile,
+) -> dict:
+    files = {
+        UPLOAD_FIELDS["contract"]: (contract, "contract"),
+        UPLOAD_FIELDS["purchase_order"]: (
+            purchase_order,
+            "purchase_order",
+        ),
+        UPLOAD_FIELDS["invoice"]: (invoice, "invoice"),
+    }
+
+    session = UploadSession(
+        upload_id=uuid4().hex,
+        storage=InMemoryDocumentStorage(),
+    )
+
+    saved_documents = []
+
+    for category, (file, label) in files.items():
+        filename = file.filename or f"{label}.pdf"
+
+        if not filename.lower().endswith(".pdf"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{label} must be a PDF file.",
+            )
+
+        payload = await file.read()
+
+        if not payload:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{label} file is empty.",
+            )
+
+        locator = f"{category}/{filename}"
+        handle = session.storage.add_document(
+            category=category,
+            locator=locator,
+            payload=payload,
+        )
+        saved_documents.append(
+            {
+                "category": category,
+                "document_id": handle.document_id,
+                "filename": handle.filename,
+                "size": handle.file_size,
+            }
+        )
+
+    upload_sessions[session.upload_id] = session
+
+    return {
+        "id": session.upload_id,
+        "documents": saved_documents,
+    }
+
+
+# ============================================================
+# MATCH RUNS
+# ============================================================
+
+
+@router.post("/matches", status_code=202)
+async def create_match(request: CreateMatchRequest) -> dict:
+    session = upload_sessions.get(request.upload_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Upload not found: {request.upload_id}",
+        )
+
+    run = MatchRun(
+        run_id=uuid4().hex,
+        upload_id=session.upload_id,
+        inject_discrepancy=request.inject_discrepancy,
+    )
+    match_runs[run.run_id] = run
+
+    start_match_run(run, session.storage)
+
+    return {
+        "id": run.run_id,
+        "status": run.status,
+        "upload_id": run.upload_id,
+        "events_url": f"/api/matches/{run.run_id}/events",
+    }
+
+
+@router.get("/matches/{run_id}")
+async def get_match(run_id: str) -> dict:
+    run = _get_run_or_404(run_id)
+
+    return {
+        "id": run.run_id,
+        "upload_id": run.upload_id,
+        "status": run.status,
+        "error": run.error,
+        "result": run.result,
+    }
+
+
+@router.get("/matches/{run_id}/events")
+async def stream_match_events(run_id: str) -> StreamingResponse:
+    run = _get_run_or_404(run_id)
+
+    async def event_stream():
+        cursor = 0
+
+        while True:
+            while cursor < len(run.events):
+                event = run.events[cursor]
+                cursor += 1
+
+                yield (
+                    "data: "
+                    + json.dumps(event, default=str)
+                    + "\n\n"
+                )
+
+                if event["type"] in {"done", "error"}:
+                    return
+
+            if run.finished and cursor >= len(run.events):
+                return
+
+            await asyncio.sleep(0.2)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _get_run_or_404(run_id: str) -> MatchRun:
+    run = match_runs.get(run_id)
+
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Match run not found: {run_id}",
+        )
+
+    return run
+
+
+# ============================================================
+# HITL CASE DECISIONS
+# ============================================================
+
+
+@router.post("/cases/{case_id}/decisions", status_code=201)
+async def create_decision(
+    case_id: str,
+    request: CreateDecisionRequest,
+) -> dict:
+    try:
+        decision_type = HITLDecisionType(request.decision)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Invalid decision. "
+                f"Allowed values: {[item.value for item in HITLDecisionType]}."
+            ),
+        )
+
+    if hitl_service.get_case(case_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"HITL case not found: {case_id}",
+        )
+
+    decision = HITLDecision(
+        decision=decision_type,
+        reviewer=request.reviewer,
+        comment=request.comment,
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    try:
+        reviewed_case = await asyncio.to_thread(
+            hitl_service.apply_decision,
+            case_id,
+            decision,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        )
+
+    return {
+        "case_id": reviewed_case.case_id,
+        "status": reviewed_case.status.value,
+        "decision": reviewed_case.decision.decision.value,
+        "reviewer": reviewed_case.reviewer,
+    }
