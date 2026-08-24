@@ -11,8 +11,9 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY app ./app
-COPY demo_full_pipeline.py demo_real_documents.py ./
+COPY Frontend/frontend ./Frontend/frontend
 COPY data ./data
 
-ENTRYPOINT ["python"]
-CMD ["demo_full_pipeline.py"]
+EXPOSE 8080
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
