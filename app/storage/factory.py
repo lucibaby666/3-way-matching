@@ -93,3 +93,32 @@ def create_document_storage() -> DocumentStorage:
 @lru_cache(maxsize=1)
 def get_document_storage() -> DocumentStorage:
     return create_document_storage()
+
+
+def create_upload_session_storage() -> DocumentStorage:
+    """
+    Storage used for API uploads. When Azure Blob is
+    configured, uploads land in the container using the
+    canonical folder layout (contracts/, purchase_orders/,
+    invoices/); otherwise an in-memory store is used.
+    """
+
+    backend = get_env(
+        "DOCUMENT_STORAGE",
+        "local",
+    ).strip().lower()
+
+    if backend in {"azure", "blob", "azure_blob"}:
+        from app.storage.upload_session_document_storage import (
+            UploadSessionDocumentStorage,
+        )
+
+        return UploadSessionDocumentStorage(
+            backend=AzureBlobDocumentStorage.from_env()
+        )
+
+    from app.storage.in_memory_document_storage import (
+        InMemoryDocumentStorage,
+    )
+
+    return InMemoryDocumentStorage()

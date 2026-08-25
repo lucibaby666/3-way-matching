@@ -143,6 +143,22 @@ class AzureBlobDocumentStorage(DocumentStorage):
 
         return payload
 
+    def write_bytes(
+        self,
+        blob_name: str,
+        payload: bytes,
+    ) -> None:
+        """
+        Upload one blob, overwriting an existing blob of the
+        same name.
+        """
+
+        self._container_client.upload_blob(
+            name=blob_name.lstrip("/"),
+            data=payload,
+            overwrite=True,
+        )
+
     def exists(self, locator: str) -> bool:
         try:
             blob_name = self._blob_name_from_locator(locator)
@@ -166,6 +182,12 @@ class AzureBlobDocumentStorage(DocumentStorage):
             return True
         except FileNotFoundError:
             return False
+
+    def azure_locator_for(self, blob_name: str) -> str:
+        return azure_locator(
+            self.container_name,
+            blob_name,
+        )
 
     def _blob_prefix(self, category: str) -> str:
         if self.prefix:

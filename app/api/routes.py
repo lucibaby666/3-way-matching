@@ -20,9 +20,7 @@ from app.api.runtime import (
 from app.models.hitl_decision import HITLDecision, HITLDecisionType
 from app.monitoring.json_logging import log_event
 from app.monitoring.run_history import record_event
-from app.storage.in_memory_document_storage import (
-    InMemoryDocumentStorage,
-)
+from app.storage.factory import create_upload_session_storage
 
 router = APIRouter(prefix="/api")
 
@@ -65,7 +63,7 @@ async def create_upload(
 
     session = UploadSession(
         upload_id=uuid4().hex,
-        storage=InMemoryDocumentStorage(),
+        storage=create_upload_session_storage(),
     )
 
     saved_documents = []

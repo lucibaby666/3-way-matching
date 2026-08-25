@@ -8,9 +8,7 @@ from app.capabilities.hitl_routing import HITLRoutingCapability
 from app.repositories.in_memory_hitl_case_repository import (
     InMemoryHITLCaseRepository,
 )
-from app.storage.in_memory_document_storage import (
-    InMemoryDocumentStorage,
-)
+from app.storage.document_storage import DocumentStorage
 
 
 def create_hitl_service() -> HITLCaseService:
@@ -27,7 +25,7 @@ hitl_service = create_hitl_service()
 @dataclass
 class UploadSession:
     upload_id: str
-    storage: InMemoryDocumentStorage
+    storage: DocumentStorage
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
