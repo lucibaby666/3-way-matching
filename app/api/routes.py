@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import datetime, timezone
+from typing import List
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, UploadFile
@@ -48,17 +49,14 @@ class CreateDecisionRequest(BaseModel):
 
 @router.post("/uploads", status_code=201)
 async def create_upload(
-    contract: UploadFile,
-    purchase_order: UploadFile,
-    invoice: UploadFile,
+    contract: List[UploadFile],
+    purchase_order: List[UploadFile],
+    invoice: List[UploadFile],
 ) -> dict:
-    files = {
-        UPLOAD_FIELDS["contract"]: (contract, "contract"),
-        UPLOAD_FIELDS["purchase_order"]: (
-            purchase_order,
-            "purchase_order",
-        ),
-        UPLOAD_FIELDS["invoice"]: (invoice, "invoice"),
+    grouped_files = {
+        "contract": contract,
+        "purchase_order": purchase_order,
+        "invoice": invoice,
     }
 
     session = UploadSession(
@@ -68,37 +66,40 @@ async def create_upload(
 
     saved_documents = []
 
-    for category, (file, label) in files.items():
-        filename = file.filename or f"{label}.pdf"
+    for field_name, files in grouped_files.items():
+        category = UPLOAD_FIELDS[field_name]
 
-        if not filename.lower().endswith(".pdf"):
-            raise HTTPException(
-                status_code=422,
-                detail=f"{label} must be a PDF file.",
+        for file in files:
+            filename = file.filename or f"{field_name}.pdf"
+
+            if not filename.lower().endswith(".pdf"):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field_name} must be a PDF file.",
+                )
+
+            payload = await file.read()
+
+            if not payload:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field_name} file is empty.",
+                )
+
+            locator = f"{category}/{filename}"
+            handle = session.storage.add_document(
+                category=category,
+                locator=locator,
+                payload=payload,
             )
-
-        payload = await file.read()
-
-        if not payload:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{label} file is empty.",
+            saved_documents.append(
+                {
+                    "category": category,
+                    "document_id": handle.document_id,
+                    "filename": handle.filename,
+                    "size": handle.file_size,
+                }
             )
-
-        locator = f"{category}/{filename}"
-        handle = session.storage.add_document(
-            category=category,
-            locator=locator,
-            payload=payload,
-        )
-        saved_documents.append(
-            {
-                "category": category,
-                "document_id": handle.document_id,
-                "filename": handle.filename,
-                "size": handle.file_size,
-            }
-        )
 
     upload_sessions[session.upload_id] = session
 

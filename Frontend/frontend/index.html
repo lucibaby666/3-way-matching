@@ -74,16 +74,16 @@ tr:last-child td{border-bottom:none}
     <h2>Upload & Run</h2>
     <div class="controls" style="align-items:flex-start">
       <label style="flex-direction:column;align-items:flex-start">
-        <span>Contract PDF</span>
-        <input type="file" id="contractFile" accept=".pdf">
+        <span>Contract PDFs</span>
+        <input type="file" id="contractFile" accept=".pdf" multiple>
       </label>
       <label style="flex-direction:column;align-items:flex-start">
-        <span>Purchase Order PDF</span>
-        <input type="file" id="poFile" accept=".pdf">
+        <span>Purchase Order PDFs</span>
+        <input type="file" id="poFile" accept=".pdf" multiple>
       </label>
       <label style="flex-direction:column;align-items:flex-start">
-        <span>Invoice PDF</span>
-        <input type="file" id="invoiceFile" accept=".pdf">
+        <span>Invoice PDFs</span>
+        <input type="file" id="invoiceFile" accept=".pdf" multiple>
       </label>
     </div>
     <div class="controls" style="margin-top:12px">
@@ -195,18 +195,18 @@ async function runMatching() {
   }
 
   try {
-    const contractFile = document.getElementById('contractFile').files?.[0];
-    const poFile = document.getElementById('poFile').files?.[0];
-    const invoiceFile = document.getElementById('invoiceFile').files?.[0];
+    const contractFiles = [...(document.getElementById('contractFile').files || [])];
+    const poFiles = [...(document.getElementById('poFile').files || [])];
+    const invoiceFiles = [...(document.getElementById('invoiceFile').files || [])];
 
-    if (!contractFile || !poFile || !invoiceFile) {
-      throw new Error('Please select all 3 PDF files (Contract, PO, Invoice).');
+    if (!contractFiles.length || !poFiles.length || !invoiceFiles.length) {
+      throw new Error('Please select at least one PDF for Contract, PO, and Invoice.');
     }
 
     const form = new FormData();
-    form.append('contract', contractFile);
-    form.append('purchase_order', poFile);
-    form.append('invoice', invoiceFile);
+    for (const file of contractFiles) form.append('contract', file);
+    for (const file of poFiles) form.append('purchase_order', file);
+    for (const file of invoiceFiles) form.append('invoice', file);
 
     let uploadRes;
     try {
