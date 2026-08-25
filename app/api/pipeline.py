@@ -10,6 +10,7 @@ from app.api.runtime import MatchRun
 from app.capabilities.document_set_loader import (
     DocumentSetLoader,
 )
+from app.capabilities.document_snip import DocumentSnip
 from app.capabilities.evidence_generator import (
     EvidenceGenerator,
 )
@@ -185,7 +186,8 @@ async def execute_match_run(
 
         evidence_dir = EVIDENCE_ROOT / run.run_id
         evidence_generator = EvidenceGenerator(
-            output_dir=str(evidence_dir)
+            document_snip=DocumentSnip(storage=storage),
+            output_dir=str(evidence_dir),
         )
         engine = MatchingEngine(
             evidence_generator=evidence_generator
