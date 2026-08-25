@@ -1,8 +1,8 @@
-import os
 from functools import lru_cache
 
 from dotenv import load_dotenv
 
+from app.env import get_env
 from app.storage.azure_blob_document_storage import (
     AzureBlobDocumentStorage,
 )
@@ -67,12 +67,12 @@ class RoutingDocumentStorage(DocumentStorage):
 
 
 def create_document_storage() -> DocumentStorage:
-    backend = os.getenv(
+    backend = get_env(
         "DOCUMENT_STORAGE",
         "local",
     ).strip().lower()
 
-    data_dir = os.getenv("DOCUMENT_DATA_DIR", "data")
+    data_dir = get_env("DOCUMENT_DATA_DIR", "data")
     local = LocalDocumentStorage(data_dir)
 
     if backend in {"azure", "blob", "azure_blob"}:

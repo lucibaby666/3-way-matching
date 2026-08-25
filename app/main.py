@@ -5,6 +5,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.pipeline import EVIDENCE_ROOT
 from app.api.routes import router
+from app.monitoring.dashboard_routes import (
+    router as dashboard_router,
+)
 
 
 app = FastAPI(
@@ -24,6 +27,7 @@ async def health_check():
 
 
 app.include_router(router)
+app.include_router(dashboard_router)
 
 EVIDENCE_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount(

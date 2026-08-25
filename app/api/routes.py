@@ -16,6 +16,7 @@ from app.api.runtime import (
     upload_sessions,
 )
 from app.models.hitl_decision import HITLDecision, HITLDecisionType
+from app.monitoring.run_history import record_event
 from app.storage.in_memory_document_storage import (
     InMemoryDocumentStorage,
 )
@@ -246,6 +247,17 @@ async def create_decision(
             status_code=409,
             detail=str(error),
         )
+
+    record_event(
+        {
+            "record_type": "decision",
+            "case_id": reviewed_case.case_id,
+            "timestamp": datetime.now(timezone.utc)
+            .isoformat(),
+            "decision": decision_type.value,
+            "reviewer": request.reviewer,
+        }
+    )
 
     return {
         "case_id": reviewed_case.case_id,

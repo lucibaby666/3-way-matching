@@ -1,16 +1,21 @@
-import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
 
+from app.env import get_env
+
 
 load_dotenv()
 
 client = DocumentIntelligenceClient(
-    endpoint=os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT"),
+    endpoint=get_env("DOCUMENT_INTELLIGENCE_ENDPOINT"),
     credential=AzureKeyCredential(
-        os.getenv("DOCUMENT_INTELLIGENCE_API_KEY")
+        get_env("DOCUMENT_INTELLIGENCE_API_KEY")
     ),
 )
 

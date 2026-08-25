@@ -1,6 +1,6 @@
-import os
 from typing import List
 
+from app.env import get_env
 from app.storage.document_types import DOCUMENT_TYPES
 from app.storage.document_storage import (
     DocumentHandle,
@@ -41,18 +41,18 @@ class AzureBlobDocumentStorage(DocumentStorage):
         from azure.identity import DefaultAzureCredential
         from azure.storage.blob import BlobServiceClient
 
-        container_name = os.getenv("AZURE_BLOB_CONTAINER")
+        container_name = get_env("AZURE_BLOB_CONTAINER")
 
         if not container_name:
             raise ValueError(
-                "AZURE_BLOB_CONTAINER is not configured."
+                "azure-blob-container is not configured."
             )
 
-        prefix = os.getenv("AZURE_BLOB_PREFIX", "")
-        connection_string = os.getenv(
+        prefix = get_env("AZURE_BLOB_PREFIX", "")
+        connection_string = get_env(
             "AZURE_STORAGE_CONNECTION_STRING"
         )
-        account_url = os.getenv("AZURE_STORAGE_ACCOUNT_URL")
+        account_url = get_env("AZURE_STORAGE_ACCOUNT_URL")
 
         if connection_string:
             service = BlobServiceClient.from_connection_string(
@@ -65,8 +65,8 @@ class AzureBlobDocumentStorage(DocumentStorage):
             )
         else:
             raise ValueError(
-                "Configure AZURE_STORAGE_CONNECTION_STRING "
-                "or AZURE_STORAGE_ACCOUNT_URL."
+                "Configure azure-storage-connection-string "
+                "or azure-storage-account-url."
             )
 
         return cls(

@@ -1,5 +1,3 @@
-import os
-
 from dotenv import load_dotenv
 from agent_framework import Agent
 from agent_framework.openai import OpenAIChatCompletionClient
@@ -9,6 +7,7 @@ from app.capabilities.matching_tools import (
     route_to_hitl,
     run_3_way_matching,
 )
+from app.env import get_env
 
 
 load_dotenv()
@@ -19,23 +18,23 @@ def create_matching_agent() -> Agent:
     Create the primary 3-way matching orchestration agent.
     """
 
-    base_url = os.getenv("FOUNDRY_OPENAI_BASE_URL")
-    api_key = os.getenv("FOUNDRY_API_KEY")
-    model = os.getenv("FOUNDRY_MODEL")
+    base_url = get_env("FOUNDRY_OPENAI_BASE_URL")
+    api_key = get_env("FOUNDRY_API_KEY")
+    model = get_env("FOUNDRY_MODEL")
 
     if not base_url:
         raise RuntimeError(
-            "FOUNDRY_OPENAI_BASE_URL is not configured."
+            "foundry-openai-base-url is not configured."
         )
 
     if not api_key:
         raise RuntimeError(
-            "FOUNDRY_API_KEY is not configured."
+            "foundry-api-key is not configured."
         )
 
     if not model:
         raise RuntimeError(
-            "FOUNDRY_MODEL is not configured."
+            "foundry-model is not configured."
         )
 
     client = OpenAIChatCompletionClient(

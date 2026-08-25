@@ -1,5 +1,7 @@
 import asyncio
 import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -11,6 +13,7 @@ from app.capabilities.evidence_generator import (
     EvidenceGenerator,
 )
 from app.matching.matching_engine import MatchingEngine
+from app.monitoring.run_history import record_event
 from app.storage.document_storage import DocumentStorage
 
 EVIDENCE_ROOT = Path("outputs/evidence")
@@ -93,6 +96,19 @@ async def execute_match_run(
             }
         )
 
+    started_at = datetime.now(timezone.utc)
+    durations_ms: Dict[str, float] = {}
+    phase_start = time.perf_counter()
+    total_start = phase_start
+
+    def mark_phase(phase_name: str) -> None:
+        nonlocal phase_start
+        now = time.perf_counter()
+        durations_ms[phase_name] = round(
+            (now - phase_start) * 1000, 1
+        )
+        phase_start = now
+
     try:
         run.status = "running"
 
@@ -104,6 +120,7 @@ async def execute_match_run(
 
         loader = DocumentSetLoader(storage=storage)
         loaded = await asyncio.to_thread(loader.load)
+        mark_phase("intake")
 
         documents = loaded["documents"]
         contracts = loaded["contracts"]
@@ -161,6 +178,7 @@ async def execute_match_run(
             purchase_orders,
             invoices,
         )
+        mark_phase("matching")
 
         step(
             "matching",
@@ -177,6 +195,7 @@ async def execute_match_run(
             hitl_service.create_case,
             result,
         )
+        mark_phase("hitl_routing")
 
         if hitl_case is None:
             step(
@@ -256,6 +275,21 @@ async def execute_match_run(
 
         run.result = payload
         run.emit({"type": "done", "payload": payload})
+        _record_run(
+            run=run,
+            started_at=started_at,
+            durations_ms=durations_ms,
+            total_start=total_start,
+            outcome="completed",
+            result=result,
+            documents=documents,
+            hitl_case_id=(
+                hitl_case.case_id
+                if hitl_case is not None
+                else None
+            ),
+            error=None,
+        )
 
     except Exception as error:
         run.emit(
@@ -264,6 +298,83 @@ async def execute_match_run(
                 "message": str(error) or error.__class__.__name__,
             }
         )
+        _record_run(
+            run=run,
+            started_at=started_at,
+            durations_ms=durations_ms,
+            total_start=total_start,
+            outcome="failed",
+            result=None,
+            documents=None,
+            hitl_case_id=None,
+            error=str(error) or error.__class__.__name__,
+        )
+
+
+def _record_run(
+    run: MatchRun,
+    started_at: datetime,
+    durations_ms: Dict[str, float],
+    total_start: float,
+    outcome: str,
+    result: Any,
+    documents: Dict[str, List[Any]] | None,
+    hitl_case_id: str | None,
+    error: str | None,
+) -> None:
+    """
+    Append one monitoring record for this run. Monitoring
+    failures must never break the pipeline.
+    """
+
+    try:
+        durations_ms = dict(durations_ms)
+        durations_ms["total"] = round(
+            (time.perf_counter() - total_start) * 1000, 1
+        )
+
+        exception_types: Dict[str, int] = {}
+
+        if result is not None:
+            for exception in result.exceptions:
+                exception_types[exception.type] = (
+                    exception_types.get(exception.type, 0)
+                    + 1
+                )
+
+        record_event(
+            {
+                "record_type": "run",
+                "run_id": run.run_id,
+                "upload_id": run.upload_id,
+                "timestamp": datetime.now(timezone.utc)
+                .isoformat(),
+                "outcome": outcome,
+                "status": (
+                    result.status
+                    if result is not None
+                    and outcome == "completed"
+                    else None
+                ),
+                "exception_count": sum(
+                    exception_types.values()
+                ),
+                "exception_types": exception_types,
+                "hitl_created": hitl_case_id is not None,
+                "case_id": hitl_case_id,
+                "durations_ms": durations_ms,
+                "documents": {
+                    category: len(items or [])
+                    for category, items in (
+                        documents or {}
+                    ).items()
+                },
+                "inject_discrepancy": run.inject_discrepancy,
+                "error": error,
+            }
+        )
+    except Exception:
+        pass
 
 
 def start_match_run(run: MatchRun, storage: DocumentStorage) -> None:

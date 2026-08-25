@@ -1,4 +1,3 @@
-import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -6,6 +5,7 @@ from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
 
+from app.env import get_env
 from app.storage.document_io import open_document_stream
 from app.storage.document_storage import DocumentStorage
 
@@ -29,17 +29,17 @@ class PurchaseOrderExtractor:
     ):
         self.storage = storage
 
-        endpoint = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
-        api_key = os.getenv("DOCUMENT_INTELLIGENCE_API_KEY")
+        endpoint = get_env("DOCUMENT_INTELLIGENCE_ENDPOINT")
+        api_key = get_env("DOCUMENT_INTELLIGENCE_API_KEY")
 
         if not endpoint:
             raise ValueError(
-                "DOCUMENT_INTELLIGENCE_ENDPOINT is not configured."
+                "document-intelligence-endpoint is not configured."
             )
 
         if not api_key:
             raise ValueError(
-                "DOCUMENT_INTELLIGENCE_API_KEY is not configured."
+                "document-intelligence-api-key is not configured."
             )
 
         self.client = DocumentIntelligenceClient(
