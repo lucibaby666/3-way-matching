@@ -37,15 +37,169 @@ Record shapes:
 """
 
 import json
+import logging
 import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.env import get_env
+from app.monitoring.json_logging import log_event
+
+logger = logging.getLogger(__name__)
+
 HISTORY_PATH = Path("outputs/run_history.jsonl")
 
 _lock = threading.Lock()
+_backend = None
+
+
+class LocalFileHistoryBackend:
+    """
+    Append monitoring records to a JSONL file on the
+    container filesystem. Not durable across restarts.
+    """
+
+    name = "local"
+
+    def append_line(self, line: str) -> None:
+        HISTORY_PATH.parent.mkdir(
+            parents=True, exist_ok=True
+        )
+
+        with HISTORY_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+    def read_lines(self) -> List[str]:
+        if not HISTORY_PATH.exists():
+            return []
+
+        with HISTORY_PATH.open(
+            "r", encoding="utf-8"
+        ) as handle:
+            return handle.read().splitlines()
+
+
+class AzureBlobHistoryBackend:
+    """
+    Append monitoring records to an Azure append blob.
+
+    Blob layout:
+
+        <container>/<RUN_HISTORY_BLOB_NAME>
+
+    Each record is one atomic append_block call, so lines
+    survive container restarts and are safe across replicas.
+    """
+
+    name = "azure"
+
+    def __init__(self, container_client, blob_name: str):
+        self._container_client = container_client
+        self._blob_name = blob_name
+        self._blob_client = (
+            container_client.get_blob_client(blob_name)
+        )
+
+    @classmethod
+    def from_env(cls) -> "AzureBlobHistoryBackend":
+        from azure.storage.blob import BlobServiceClient
+
+        container_name = get_env(
+            "RUN_HISTORY_BLOB_CONTAINER"
+        ) or get_env("AZURE_BLOB_CONTAINER")
+
+        if not container_name:
+            raise ValueError(
+                "Configure run-history-blob-container "
+                "(or azure-blob-container)."
+            )
+
+        blob_name = get_env(
+            "RUN_HISTORY_BLOB_NAME",
+            "monitoring/run_history.jsonl",
+        )
+
+        connection_string = get_env(
+            "AZURE_STORAGE_CONNECTION_STRING"
+        )
+        account_url = get_env(
+            "AZURE_STORAGE_ACCOUNT_URL"
+        )
+
+        if connection_string:
+            service = BlobServiceClient.from_connection_string(
+                connection_string
+            )
+        elif account_url:
+            from azure.identity import DefaultAzureCredential
+
+            service = BlobServiceClient(
+                account_url=account_url,
+                credential=DefaultAzureCredential(),
+            )
+        else:
+            raise ValueError(
+                "Configure azure-storage-connection-string "
+                "or azure-storage-account-url."
+            )
+
+        return cls(
+            container_client=service.get_container_client(
+                container_name
+            ),
+            blob_name=blob_name,
+        )
+
+    def append_line(self, line: str) -> None:
+        if not self._blob_client.exists():
+            try:
+                self._blob_client.create_append_blob()
+            except Exception as exc:
+                if exc.__class__.__name__ != "ResourceExistsError":
+                    raise
+
+        self._blob_client.append_block(line + "\n")
+
+    def read_lines(self) -> List[str]:
+        if not self._blob_client.exists():
+            return []
+
+        downloader = self._blob_client.download_blob()
+        payload = downloader.readall() or b""
+
+        return payload.decode("utf-8").splitlines()
+
+
+def _create_backend():
+    mode = str(
+        get_env("RUN_HISTORY_STORAGE", "local")
+    ).strip().lower()
+
+    if mode in {"azure", "blob", "azure_blob"}:
+        return AzureBlobHistoryBackend.from_env()
+
+    return LocalFileHistoryBackend()
+
+
+def _get_backend():
+    global _backend
+
+    if _backend is None:
+        try:
+            _backend = _create_backend()
+        except Exception as exc:
+            log_event(
+                logger,
+                "history_backend_init_failed",
+                level=logging.ERROR,
+                error_type=exc.__class__.__name__,
+                error_message=str(exc),
+            )
+            _backend = LocalFileHistoryBackend()
+
+    return _backend
 
 
 def record_event(record: Dict[str, Any]) -> None:
@@ -58,16 +212,17 @@ def record_event(record: Dict[str, Any]) -> None:
         line = json.dumps(record, default=str)
 
         with _lock:
-            HISTORY_PATH.parent.mkdir(
-                parents=True, exist_ok=True
-            )
-
-            with HISTORY_PATH.open(
-                "a", encoding="utf-8"
-            ) as handle:
-                handle.write(line + "\n")
-    except OSError:
-        pass
+            backend = _get_backend()
+            backend.append_line(line)
+    except Exception as exc:
+        log_event(
+            logger,
+            "history_write_failed",
+            level=logging.ERROR,
+            backend=getattr(_backend, "name", "unknown"),
+            error_type=exc.__class__.__name__,
+            error_message=str(exc),
+        )
 
 
 def read_events(
@@ -78,9 +233,6 @@ def read_events(
     most recent N hours. Malformed lines are skipped.
     """
 
-    if not HISTORY_PATH.exists():
-        return []
-
     cutoff = None
 
     if limit_hours is not None:
@@ -90,33 +242,46 @@ def read_events(
 
     events: List[Dict[str, Any]] = []
 
-    with HISTORY_PATH.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
+    try:
+        with _lock:
+            lines = _get_backend().read_lines()
+    except Exception as exc:
+        log_event(
+            logger,
+            "history_read_failed",
+            level=logging.ERROR,
+            backend=getattr(_backend, "name", "unknown"),
+            error_type=exc.__class__.__name__,
+            error_message=str(exc),
+        )
+        return events
 
-            if not line:
+    for line in lines:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if cutoff is not None:
+            timestamp = event.get("timestamp")
+
+            if not timestamp:
                 continue
 
             try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
+                parsed = _parse_timestamp(timestamp)
+            except ValueError:
                 continue
 
-            if cutoff is not None:
-                timestamp = event.get("timestamp")
+            if parsed < cutoff:
+                continue
 
-                if not timestamp:
-                    continue
-
-                try:
-                    parsed = _parse_timestamp(timestamp)
-                except ValueError:
-                    continue
-
-                if parsed < cutoff:
-                    continue
-
-            events.append(event)
+        events.append(event)
 
     return events
 
