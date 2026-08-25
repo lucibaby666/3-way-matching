@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import List
 from uuid import uuid4
@@ -17,12 +18,15 @@ from app.api.runtime import (
     upload_sessions,
 )
 from app.models.hitl_decision import HITLDecision, HITLDecisionType
+from app.monitoring.json_logging import log_event
 from app.monitoring.run_history import record_event
 from app.storage.in_memory_document_storage import (
     InMemoryDocumentStorage,
 )
 
 router = APIRouter(prefix="/api")
+
+logger = logging.getLogger(__name__)
 
 UPLOAD_FIELDS = {
     "contract": "contracts",
@@ -103,6 +107,15 @@ async def create_upload(
 
     upload_sessions[session.upload_id] = session
 
+    log_event(
+        logger,
+        "upload_created",
+        upload_id=session.upload_id,
+        contract_count=len(contract),
+        purchase_order_count=len(purchase_order),
+        invoice_count=len(invoice),
+    )
+
     return {
         "id": session.upload_id,
         "documents": saved_documents,
@@ -132,6 +145,14 @@ async def create_match(request: CreateMatchRequest) -> dict:
     match_runs[run.run_id] = run
 
     start_match_run(run, session.storage)
+
+    log_event(
+        logger,
+        "match_started",
+        run_id=run.run_id,
+        upload_id=run.upload_id,
+        inject_discrepancy=request.inject_discrepancy,
+    )
 
     return {
         "id": run.run_id,
@@ -195,6 +216,13 @@ def _get_run_or_404(run_id: str) -> MatchRun:
     run = match_runs.get(run_id)
 
     if run is None:
+        log_event(
+            logger,
+            "run_not_found",
+            level=logging.WARNING,
+            run_id=run_id,
+            active_run_count=len(match_runs),
+        )
         raise HTTPException(
             status_code=404,
             detail=f"Match run not found: {run_id}",
@@ -258,6 +286,14 @@ async def create_decision(
             "decision": decision_type.value,
             "reviewer": request.reviewer,
         }
+    )
+
+    log_event(
+        logger,
+        "hitl_decision_recorded",
+        case_id=reviewed_case.case_id,
+        decision=decision_type.value,
+        reviewer=request.reviewer,
     )
 
     return {

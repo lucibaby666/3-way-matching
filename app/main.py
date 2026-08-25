@@ -8,7 +8,12 @@ from app.api.routes import router
 from app.monitoring.dashboard_routes import (
     router as dashboard_router,
 )
+from app.monitoring.json_logging import (
+    configure_structured_logging,
+)
 
+
+configure_structured_logging()
 
 app = FastAPI(
     title="Agentic 3-Way Matching POC",

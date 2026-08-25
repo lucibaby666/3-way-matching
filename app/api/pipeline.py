@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 import time
 from datetime import datetime, timezone
@@ -13,10 +14,13 @@ from app.capabilities.evidence_generator import (
     EvidenceGenerator,
 )
 from app.matching.matching_engine import MatchingEngine
+from app.monitoring.json_logging import log_event
 from app.monitoring.run_history import record_event
 from app.storage.document_storage import DocumentStorage
 
 EVIDENCE_ROOT = Path("outputs/evidence")
+
+logger = logging.getLogger(__name__)
 
 LINE_FIELDS = (
     "item_code",
@@ -88,6 +92,20 @@ async def execute_match_run(
     """
 
     def step(step_name: str, message: str) -> None:
+        logger.info(
+            "Match run %s [%s]: %s",
+            run.run_id,
+            step_name,
+            message,
+        )
+        log_event(
+            logger,
+            "pipeline_step",
+            run_id=run.run_id,
+            upload_id=run.upload_id,
+            step=step_name,
+            message=message,
+        )
         run.emit(
             {
                 "type": "step",
@@ -291,7 +309,35 @@ async def execute_match_run(
             error=None,
         )
 
+        log_event(
+            logger,
+            "run_completed",
+            run_id=run.run_id,
+            upload_id=run.upload_id,
+            status=result.status,
+            exception_count=len(result.exceptions),
+            hitl_created=hitl_case is not None,
+            duration_ms=durations_ms.get("total"),
+            inject_discrepancy=run.inject_discrepancy,
+        )
+
     except Exception as error:
+        logger.exception(
+            "Match run %s failed (completed phases: %s)",
+            run.run_id,
+            list(durations_ms.keys()) or "none",
+        )
+        log_event(
+            logger,
+            "run_failed",
+            level=logging.ERROR,
+            run_id=run.run_id,
+            upload_id=run.upload_id,
+            error_type=type(error).__name__,
+            error_message=str(error),
+            completed_phases=list(durations_ms.keys()),
+            inject_discrepancy=run.inject_discrepancy,
+        )
         run.emit(
             {
                 "type": "error",
