@@ -13,6 +13,7 @@ RUN pip install --upgrade pip \
 COPY app ./app
 COPY Frontend/frontend ./Frontend/frontend
 COPY data ./data
+COPY users.json .
 
 EXPOSE 8080
 
