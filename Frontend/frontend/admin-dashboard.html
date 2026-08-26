@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard — 3-Way Matching</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#f4f6f9;--card:#fff;--primary:#2563eb;--danger:#ef4444;--success:#16a34a;--warn:#f59e0b;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--radius:10px}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    header{background:linear-gradient(135deg,#1e3a5f,#2563eb);color:#fff;padding:24px 32px;display:flex;align-items:center;gap:16px}
+    header h1{font-size:1.5rem;font-weight:600}
+    header span{font-size:.85rem;opacity:.8}
+    .container{max-width:1200px;margin:0 auto;padding:24px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px;margin-bottom:20px}
+    .card h2{font-size:1.1rem;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600;text-transform:uppercase}
+    .badge-pass{background:#dcfce7;color:#166534}
+    .badge-exception{background:#fee2e2;color:#991b1b}
+    .badge-failed{background:#fee2e2;color:#991b1b}
+    btn,.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border:none;border-radius:var(--radius);font-size:.9rem;font-weight:500;cursor:pointer;transition:.2s}
+    .btn-light{background:rgba(255,255,255,.15);color:#fff;text-decoration:none}
+    .btn-light:hover{background:rgba(255,255,255,.25)}
+    .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{filter:brightness(1.1)}
+    table{width:100%;border-collapse:collapse;font-size:.85rem}
+    th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid var(--border);color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
+    td{padding:10px 12px;border-bottom:1px solid var(--border)}
+    tr:last-child td{border-bottom:none}
+    .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:20px}
+    .kpi{background:var(--card);border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,.08);padding:18px 20px}
+    .kpi .label{font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:.5px}
+    .kpi .value{font-size:1.7rem;font-weight:700;margin-top:6px}
+    .kpi .sub{font-size:.78rem;color:var(--muted);margin-top:2px}
+    .chart-row{display:grid;grid-template-columns:2fr 1fr;gap:20px}
+    @media(max-width:900px){.chart-row{grid-template-columns:1fr}}
+    .azure-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
+    .metric-table td:first-child{font-weight:500}
+    .notice{background:#fef9c3;border-left:4px solid var(--warn);border-radius:6px;padding:12px 16px;font-size:.85rem;color:#854d0e;margin-bottom:12px}
+    .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px;font-size:.85rem;color:var(--muted)}
+    #loading{text-align:center;padding:40px;color:var(--muted);font-size:1rem}
+    .spinner{display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .toast{position:fixed;bottom:24px;right:24px;background:#1e293b;color:#fff;padding:12px 20px;border-radius:8px;font-size:.9rem;z-index:999;opacity:0;transition:opacity .3s}
+    .toast.show{opacity:1}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 13l3-3 3 2 5-5"/></svg>
+  <div>
+    <h1>Admin Dashboard</h1>
+    <span>Pipeline health &bull; Azure platform &bull; System</span>
+  </div>
+  <a href="/" class="btn btn-light" style="margin-left:auto">&larr; Matching</a>
+  <span id="userBadge" style="font-size:.85rem;opacity:.9"></span>
+  <button class="btn btn-light" onclick="logout()">Logout</button>
+</header>
+
+<script>
+(async () => {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error();
+    const user = await res.json();
+    if (user.role !== 'ADMIN') { location.href = '/audit-dashboard.html'; return; }
+    document.getElementById('userBadge').textContent =
+      user.username + ' (' + user.role.toLowerCase() + ')';
+  } catch { location.href = '/login.html'; }
+})();
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.href = '/login.html';
+}
+</script>
+
+<div class="container">
+
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="loadAll()">Refresh now</button>
+    <label style="display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="autoRefresh" checked> Auto-refresh every 30s
+    </label>
+    <span id="lastUpdated"></span>
+  </div>
+
+  <div id="loading"><span class="spinner"></span>Loading dashboard &hellip;</div>
+  <div id="content" class="hidden">
+
+    <!-- KPI cards -->
+    <div class="kpi-grid" id="kpiGrid"></div>
+
+    <!-- Charts -->
+    <div class="chart-row">
+      <div class="card">
+        <h2>Runs per day</h2>
+        <canvas id="runsChart" height="110"></canvas>
+      </div>
+      <div class="card">
+        <h2>Exceptions by type</h2>
+        <canvas id="exceptionsChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Pipeline durations -->
+    <div class="card">
+      <h2>Average pipeline duration by phase</h2>
+      <table id="phaseTable">
+        <thead><tr><th>Phase</th><th>Average duration (ms)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- System health -->
+    <div class="card">
+      <h2>System health</h2>
+      <table id="systemTable">
+        <thead><tr><th>Property</th><th>Value</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Azure platform metrics -->
+    <h2 style="margin:26px 0 14px;font-size:1.15rem">Azure platform metrics</h2>
+    <div class="azure-grid">
+      <div class="card">
+        <h2>Document Intelligence</h2>
+        <div id="diNotice"></div>
+        <table id="diTable" class="metric-table">
+          <thead><tr><th>Metric</th><th>Total</th><th>Avg</th><th>Unit</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Storage (Blob)</h2>
+        <div id="storageNotice"></div>
+        <table id="storageTable" class="metric-table">
+          <thead><tr><th>Metric</th><th>Total</th><th>Avg</th><th>Unit</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Recent runs -->
+    <div class="card">
+      <h2>Recent runs</h2>
+      <table id="recentTable">
+        <thead><tr><th>Time (UTC)</th><th>Status</th><th>Exceptions</th><th>HITL</th><th>Duration</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';
+let runsChart = null;
+let exceptionsChart = null;
+let refreshTimer = null;
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+function kpiCard(label, value, sub) {
+  return `<div class="kpi">
+    <div class="label">${label}</div>
+    <div class="value">${value}</div>
+    ${sub ? `<div class="sub">${sub}</div>` : ''}
+  </div>`;
+}
+
+function renderSummary(data) {
+  const totals = data.totals || {};
+  document.getElementById('kpiGrid').innerHTML = [
+    kpiCard('Total Runs', totals.runs ?? 0,
+      `${totals.completed ?? 0} completed / ${totals.failed ?? 0} failed`),
+    kpiCard('Match Rate',
+      data.match_rate_pct === null || data.match_rate_pct === undefined ? '—' : `${data.match_rate_pct}%`,
+      `${totals.passed ?? 0} passed of ${totals.completed ?? 0}`),
+    kpiCard('Exceptions Found', totals.exceptions_found ?? 0,
+      `${totals.with_exceptions ?? 0} run(s) with exceptions`),
+    kpiCard('Open HITL Cases', totals.open_hitl_cases ?? 0,
+      `${totals.hitl_cases_created ?? 0} created in window`),
+    kpiCard('Avg Duration',
+      data.avg_duration_ms == null ? '—' : `${Math.round(data.avg_duration_ms)} ms`,
+      `${totals.documents_processed ?? 0} documents processed`),
+  ].join('');
+
+  // Runs per day chart
+  const days = data.runs_per_day || [];
+  const labels = days.map(d => d.date);
+  const ctx = document.getElementById('runsChart').getContext('2d');
+
+  if (runsChart) runsChart.destroy();
+  runsChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Passed', data: days.map(d => d.pass), backgroundColor: '#16a34a' },
+        { label: 'Exception', data: days.map(d => d.exception), backgroundColor: '#ef4444' },
+      ],
+    },
+    options: {
+      responsive: true,
+      scales: { x: { stacked: true }, y: { stacked: true, ticks: { precision: 0 } } },
+    },
+  });
+
+  // Exceptions doughnut
+  const breakdown = data.exception_breakdown || {};
+  const eCtx = document.getElementById('exceptionsChart').getContext('2d');
+
+  if (exceptionsChart) exceptionsChart.destroy();
+  exceptionsChart = new Chart(eCtx, {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(breakdown).length ? Object.keys(breakdown) : ['No exceptions'],
+      datasets: [{
+        data: Object.keys(breakdown).length ? Object.values(breakdown) : [1],
+        backgroundColor: ['#ef4444', '#f59e0b', '#2563eb', '#7c3aed', '#0ea5e9', '#94a3b8'],
+      }],
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } },
+  });
+
+  // Phase table
+  const tbody = document.querySelector('#phaseTable tbody');
+  tbody.innerHTML = '';
+  for (const [phase, avg] of Object.entries(data.duration_breakdown_avg_ms || {})) {
+    tbody.innerHTML += `<tr><td style="text-transform:capitalize">${phase.replace(/_/g, ' ')}</td><td>${avg}</td></tr>`;
+  }
+  if (!tbody.innerHTML) {
+    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No run data yet.</td></tr>';
+  }
+
+  // System table
+  const sys = data.system || {};
+  const sBody = document.querySelector('#systemTable tbody');
+  sBody.innerHTML = `
+    <tr><td>Service uptime</td><td>${Math.floor((sys.uptime_seconds ?? 0) / 60)} min</td></tr>
+    <tr><td>Document storage mode</td><td>${sys.document_storage ?? '—'}</td></tr>
+    <tr><td>Run history backend</td><td>${sys.run_history_backend ?? '—'}</td></tr>
+    <tr><td>Azure configured</td><td>${sys.azure_configured ? 'Yes' : 'No'}</td></tr>
+  `;
+
+  // Recent runs
+  const rBody = document.querySelector('#recentTable tbody');
+  rBody.innerHTML = '';
+  for (const run of (data.recent_runs || [])) {
+    const badge = run.outcome !== 'completed'
+      ? '<span class="badge badge-failed">FAILED</span>'
+      : run.status === 'PASS'
+        ? '<span class="badge badge-pass">PASS</span>'
+        : '<span class="badge badge-exception">EXCEPTION</span>';
+    const duration = run.durations_ms?.total != null ? `${Math.round(run.durations_ms.total)} ms` : '—';
+    const time = (run.timestamp || '').replace('T', ' ').split('.')[0];
+    rBody.innerHTML += `<tr>
+      <td>${time}</td>
+      <td>${badge}</td>
+      <td>${run.exception_count ?? 0}</td>
+      <td>${run.case_id ? run.case_id.slice(0, 8) + '…' : '—'}</td>
+      <td>${duration}</td>
+    </tr>`;
+  }
+  if (!rBody.innerHTML) {
+    rBody.innerHTML = '<tr><td colspan="5" style="color:var(--muted)">No runs recorded yet.</td></tr>';
+  }
+}
+
+function renderMetricSection(section, noticeEl, tbodyEl) {
+  const notice = document.getElementById(noticeEl);
+  const tbody = document.getElementById(tbodyEl);
+
+  if (!section || !section.available) {
+    notice.innerHTML = section?.reason
+      ? `<div class="notice">${section.reason} Add the Monitoring Reader role and set env vars to enable.</div>`
+      : '';
+    tbody.parentElement.style.display = 'none';
+    return;
+  }
+
+  notice.innerHTML = '';
+  tbody.parentElement.style.display = '';
+  tbody.innerHTML = '';
+
+  for (const metric of section.metrics) {
+    const unit = metric.unit ? metric.unit.replace('PerSecond', '/s') : '';
+    tbody.innerHTML += `<tr>
+      <td>${metric.display_name}</td>
+      <td>${metric.sum ?? '—'}</td>
+      <td>${metric.avg ?? '—'}</td>
+      <td>${unit || '—'}</td>
+    </tr>`;
+  }
+}
+
+async function loadAll() {
+  try {
+    document.getElementById('loading').classList.remove('hidden');
+
+    const [summary, azure] = await Promise.all([
+      fetchJson(`${API}/api/dashboard/summary?hours=168`).catch(err => ({ error: err })),
+      fetchJson(`${API}/api/dashboard/azure-metrics?hours=24`).catch(() => null),
+    ]);
+
+    if (summary instanceof Error) throw summary;
+
+    renderSummary(summary);
+
+    renderMetricSection(azure?.document_intelligence, 'diNotice', 'diTable');
+    renderMetricSection(azure?.storage, 'storageNotice', 'storageTable');
+
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('lastUpdated').textContent =
+      `Last updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    document.getElementById('loading').classList.add('hidden');
+    toast('Error: ' + e.message);
+  }
+}
+
+document.getElementById('autoRefresh').addEventListener('change', (event) => {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  if (event.target.checked) refreshTimer = setInterval(loadAll, 30000);
+});
+
+if (document.getElementById('autoRefresh').checked) {
+  refreshTimer = setInterval(loadAll, 30000);
+}
+
+loadAll();
+</script>
+</body>
+</html>

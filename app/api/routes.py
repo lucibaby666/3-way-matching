@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import List
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -17,12 +17,20 @@ from app.api.runtime import (
     match_runs,
     upload_sessions,
 )
+from app.auth.dependencies import (
+    UserAccount,
+    get_current_user,
+    require_admin_or_audit,
+)
 from app.models.hitl_decision import HITLDecision, HITLDecisionType
 from app.monitoring.json_logging import log_event
 from app.monitoring.run_history import record_event
 from app.storage.factory import create_upload_session_storage
 
-router = APIRouter(prefix="/api")
+router = APIRouter(
+    prefix="/api",
+    dependencies=[Depends(require_admin_or_audit)],
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +48,7 @@ class CreateMatchRequest(BaseModel):
 
 class CreateDecisionRequest(BaseModel):
     decision: str = Field(min_length=1)
-    reviewer: str = Field(min_length=1)
+    reviewer: str = ""
     comment: str = ""
 
 
@@ -238,7 +246,10 @@ def _get_run_or_404(run_id: str) -> MatchRun:
 async def create_decision(
     case_id: str,
     request: CreateDecisionRequest,
+    user: UserAccount = Depends(get_current_user),
 ) -> dict:
+    reviewer = request.reviewer.strip() or user.username
+
     try:
         decision_type = HITLDecisionType(request.decision)
     except ValueError:
@@ -258,7 +269,7 @@ async def create_decision(
 
     decision = HITLDecision(
         decision=decision_type,
-        reviewer=request.reviewer,
+        reviewer=reviewer,
         comment=request.comment,
         timestamp=datetime.now(timezone.utc),
     )
@@ -282,7 +293,7 @@ async def create_decision(
             "timestamp": datetime.now(timezone.utc)
             .isoformat(),
             "decision": decision_type.value,
-            "reviewer": request.reviewer,
+            "reviewer": reviewer,
         }
     )
 
@@ -291,7 +302,7 @@ async def create_decision(
         "hitl_decision_recorded",
         case_id=reviewed_case.case_id,
         decision=decision_type.value,
-        reviewer=request.reviewer,
+        reviewer=reviewer,
     )
 
     return {

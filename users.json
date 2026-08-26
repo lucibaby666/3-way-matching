@@ -1,0 +1,14 @@
+{
+  "users": [
+    {
+      "username": "admin",
+      "role": "ADMIN",
+      "password_hash": "pbkdf2_sha256$390000$dab7df3e5f39d073e133b967d8cdd4a8$78f0da94c4b25b6e1da85c5bc0812519ba8b5958f5ebe99260e8b00be8e1d031"
+    },
+    {
+      "username": "audit",
+      "role": "AUDIT",
+      "password_hash": "pbkdf2_sha256$390000$cdad8dbe15fdaf9af9614ea853beb255$a3b9205dc8a3e378e78de5a6da3da2e4a716461b5ce2998cbb14f5f67a654b87"
+    }
+  ]
+}

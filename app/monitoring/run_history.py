@@ -407,6 +407,167 @@ def summarize_runs(
     }
 
 
+def summarize_audit(
+    limit_hours: float = 168,
+    sla_hours: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Aggregate audit-focused KPIs: HITL workload, decision
+    outcomes, reviewer activity and SLA breaches.
+    """
+
+    if sla_hours is None:
+        try:
+            sla_hours = float(
+                get_env("HITL_SLA_HOURS", "24")
+            )
+        except ValueError:
+            sla_hours = 24.0
+
+    events = read_events(limit_hours)
+
+    runs = [
+        event
+        for event in events
+        if event.get("record_type") == "run"
+    ]
+    decisions = [
+        event
+        for event in events
+        if event.get("record_type") == "decision"
+    ]
+
+    completed_runs = [
+        run
+        for run in runs
+        if run.get("outcome") == "completed"
+    ]
+
+    # Case creation timestamps come from the run records.
+    case_created: Dict[str, str] = {}
+
+    for run in completed_runs:
+        case_id = run.get("case_id")
+
+        if run.get("hitl_created") and case_id:
+            created = run.get("timestamp")
+
+            if case_id not in case_created or (
+                created
+                and created < case_created[case_id]
+            ):
+                case_created[case_id] = created
+
+    decided_case_ids = {
+        decision.get("case_id")
+        for decision in decisions
+        if decision.get("case_id")
+    }
+
+    open_cases = set(case_created) - decided_case_ids
+
+    now = datetime.now(timezone.utc)
+    open_ages_hours: List[float] = []
+
+    for case_id in open_cases:
+        try:
+            created = _parse_timestamp(
+                case_created[case_id]
+            )
+        except (ValueError, KeyError):
+            continue
+
+        open_ages_hours.append(
+            (now - created).total_seconds() / 3600
+        )
+
+    sla_breaches = [
+        age
+        for age in open_ages_hours
+        if age > sla_hours
+    ]
+
+    # Resolution times from decision vs case creation.
+    resolution_hours: List[float] = []
+
+    for decision in decisions:
+        case_id = decision.get("case_id")
+        created = case_created.get(case_id)
+
+        if not created or not decision.get("timestamp"):
+            continue
+
+        try:
+            delta = _parse_timestamp(
+                decision["timestamp"]
+            ) - _parse_timestamp(created)
+        except ValueError:
+            continue
+
+        resolution_hours.append(
+            max(delta.total_seconds() / 3600, 0)
+        )
+
+    decision_types: Counter = Counter()
+    per_reviewer: Counter = Counter()
+
+    for decision in decisions:
+        if decision.get("decision"):
+            decision_types[
+                decision["decision"]
+            ] += 1
+
+        if decision.get("reviewer"):
+            per_reviewer[decision["reviewer"]] += 1
+
+    recent_decisions = sorted(
+        decisions,
+        key=lambda item: item.get("timestamp") or "",
+        reverse=True,
+    )[:10]
+
+    exception_counter: Counter = Counter()
+    total_exceptions = 0
+
+    for run in completed_runs:
+        types = run.get("exception_types") or {}
+
+        for exception_type, count in types.items():
+            exception_counter[exception_type] += count
+            total_exceptions += count
+
+    return {
+        "window_hours": limit_hours,
+        "sla_hours": sla_hours,
+        "hitl": {
+            "cases_created": len(case_created),
+            "cases_resolved": len(decided_case_ids),
+            "cases_open": len(open_cases),
+            "sla_breached_open": len(sla_breaches),
+            "oldest_open_age_hours": round(
+                max(open_ages_hours), 1
+            )
+            if open_ages_hours
+            else 0,
+        },
+        "decisions": {
+            "total": len(decisions),
+            "by_type": dict(decision_types),
+            "avg_resolution_hours": round(
+                sum(resolution_hours)
+                / len(resolution_hours),
+                1,
+            )
+            if resolution_hours
+            else None,
+        },
+        "reviewers": dict(per_reviewer),
+        "exceptions_by_type": dict(exception_counter),
+        "exceptions_total": total_exceptions,
+        "recent_decisions": recent_decisions,
+    }
+
+
 # ============================================================
 # INTERNAL HELPERS
 # ============================================================

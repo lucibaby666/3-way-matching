@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audit Dashboard — 3-Way Matching</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#f4f6f9;--card:#fff;--primary:#2563eb;--danger:#ef4444;--success:#16a34a;--warn:#f59e0b;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--radius:10px}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    header{background:linear-gradient(135deg,#5b3a1e,#d97706);color:#fff;padding:24px 32px;display:flex;align-items:center;gap:16px}
+    header h1{font-size:1.5rem;font-weight:600}
+    header span{font-size:.85rem;opacity:.8}
+    .container{max-width:1200px;margin:0 auto;padding:24px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px;margin-bottom:20px}
+    .card h2{font-size:1.1rem;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600;text-transform:uppercase}
+    .badge-approve{background:#dcfce7;color:#166534}
+    .badge-reject{background:#fee2e2;color:#991b1b}
+    .badge-override{background:#dbeafe;color:#1e40af}
+    btn,.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border:none;border-radius:var(--radius);font-size:.9rem;font-weight:500;cursor:pointer;transition:.2s}
+    .btn-light{background:rgba(255,255,255,.15);color:#fff;text-decoration:none}
+    .btn-light:hover{background:rgba(255,255,255,.25)}
+    .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{filter:brightness(1.1)}
+    table{width:100%;border-collapse:collapse;font-size:.85rem}
+    th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid var(--border);color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
+    td{padding:10px 12px;border-bottom:1px solid var(--border)}
+    tr:last-child td{border-bottom:none}
+    .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:20px}
+    .kpi{background:var(--card);border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,.08);padding:18px 20px}
+    .kpi .label{font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:.5px}
+    .kpi .value{font-size:1.7rem;font-weight:700;margin-top:6px}
+    .kpi .sub{font-size:.78rem;color:var(--muted);margin-top:2px}
+    .kpi.alert .value{color:var(--danger)}
+    .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    @media(max-width:900px){.chart-row{grid-template-columns:1fr}}
+    .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px;font-size:.85rem;color:var(--muted)}
+    #loading{text-align:center;padding:40px;color:var(--muted);font-size:1rem}
+    .spinner{display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .toast{position:fixed;bottom:24px;right:24px;background:#1e293b;color:#fff;padding:12px 20px;border-radius:8px;font-size:.9rem;z-index:999;opacity:0;transition:opacity .3s}
+    .toast.show{opacity:1}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+  <div>
+    <h1>Audit Dashboard</h1>
+    <span>HITL workload &bull; Decisions &bull; Reviewer activity</span>
+  </div>
+  <a href="/" class="btn btn-light" style="margin-left:auto">&larr; Matching</a>
+  <span id="userBadge" style="font-size:.85rem;opacity:.9"></span>
+  <button class="btn btn-light" onclick="logout()">Logout</button>
+</header>
+
+<script>
+(async () => {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error();
+    const user = await res.json();
+    if (user.role !== 'AUDIT' && user.role !== 'ADMIN') { location.href = '/login.html'; return; }
+    document.getElementById('userBadge').textContent =
+      user.username + ' (' + user.role.toLowerCase() + ')';
+  } catch { location.href = '/login.html'; }
+})();
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.href = '/login.html';
+}
+</script>
+
+<div class="container">
+
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="loadAll()">Refresh now</button>
+    <label style="display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="autoRefresh" checked> Auto-refresh every 30s
+    </label>
+    <span id="lastUpdated"></span>
+  </div>
+
+  <div id="loading"><span class="spinner"></span>Loading dashboard &hellip;</div>
+  <div id="content" class="hidden">
+
+    <!-- Audit KPI cards -->
+    <div class="kpi-grid" id="kpiGrid"></div>
+
+    <!-- Charts -->
+    <div class="chart-row">
+      <div class="card">
+        <h2>Exceptions by type</h2>
+        <canvas id="exceptionsChart"></canvas>
+      </div>
+      <div class="card">
+        <h2>Decisions by outcome</h2>
+        <canvas id="decisionsChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-row">
+      <div class="card">
+        <h2>Decisions per reviewer</h2>
+        <canvas id="reviewersChart"></canvas>
+      </div>
+      <div class="card">
+        <h2>HITL workload</h2>
+        <table id="hitlTable">
+          <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Recent decisions -->
+    <div class="card">
+      <h2>Recent decisions</h2>
+      <table id="decisionsTable">
+        <thead><tr><th>Time (UTC)</th><th>Case</th><th>Decision</th><th>Reviewer</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';
+let exceptionsChart = null;
+let decisionsChart = null;
+let reviewersChart = null;
+let refreshTimer = null;
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+function kpiCard(label, value, sub, alert) {
+  return `<div class="kpi${alert ? ' alert' : ''}">
+    <div class="label">${label}</div>
+    <div class="value">${value}</div>
+    ${sub ? `<div class="sub">${sub}</div>` : ''}
+  </div>`;
+}
+
+function renderKpis(data) {
+  const hitl = data.hitl || {};
+  const decisions = data.decisions || {};
+  document.getElementById('kpiGrid').innerHTML = [
+    kpiCard('Open HITL Cases', hitl.cases_open ?? 0,
+      `${hitl.cases_created ?? 0} created in window`),
+    kpiCard('SLA Breaches', hitl.sla_breached_open ?? 0,
+      `open > ${data.sla_hours ?? 24}h`,
+      (hitl.sla_breached_open ?? 0) > 0),
+    kpiCard('Cases Resolved', decisions.total ?? 0,
+      `${hitl.cases_open ?? 0} still open`),
+    kpiCard('Avg Resolution Time',
+      decisions.avg_resolution_hours == null ? '—' : `${decisions.avg_resolution_hours} h`,
+      `oldest open case ${hitl.oldest_open_age_hours ?? 0} h`),
+    kpiCard('Exceptions Found', data.exceptions_total ?? 0,
+      'across completed runs'),
+  ].join('');
+}
+
+function renderCharts(data) {
+  // Exceptions doughnut
+  const breakdown = data.exceptions_by_type || {};
+  if (exceptionsChart) exceptionsChart.destroy();
+  exceptionsChart = new Chart(
+    document.getElementById('exceptionsChart').getContext('2d'),
+    {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(breakdown).length ? Object.keys(breakdown) : ['No exceptions'],
+        datasets: [{
+          data: Object.keys(breakdown).length ? Object.values(breakdown) : [1],
+          backgroundColor: ['#ef4444', '#f59e0b', '#2563eb', '#7c3aed', '#0ea5e9', '#94a3b8'],
+        }],
+      },
+      options: { responsive: true, plugins: { legend: { position: 'bottom' } } },
+    }
+  );
+
+  // Decision outcomes bar
+  const byType = data.decisions?.by_type || {};
+  const order = ['APPROVE', 'REJECT', 'OVERRIDE'];
+  const colors = { APPROVE: '#16a34a', REJECT: '#ef4444', OVERRIDE: '#2563eb' };
+  if (decisionsChart) decisionsChart.destroy();
+  decisionsChart = new Chart(
+    document.getElementById('decisionsChart').getContext('2d'),
+    {
+      type: 'bar',
+      data: {
+        labels: order,
+        datasets: [{
+          label: 'Decisions',
+          data: order.map(k => byType[k] ?? 0),
+          backgroundColor: order.map(k => colors[k]),
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { ticks: { precision: 0 } } },
+      },
+    }
+  );
+
+  // Reviewers bar
+  const reviewers = data.reviewers || {};
+  if (reviewersChart) reviewersChart.destroy();
+  reviewersChart = new Chart(
+    document.getElementById('reviewersChart').getContext('2d'),
+    {
+      type: 'bar',
+      data: {
+        labels: Object.keys(reviewers).length ? Object.keys(reviewers) : ['No decisions'],
+        datasets: [{
+          label: 'Decisions',
+          data: Object.keys(reviewers).length ? Object.values(reviewers) : [0],
+          backgroundColor: '#f59e0b',
+        }],
+      },
+      options: {
+        responsive: true,
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { ticks: { precision: 0 } } },
+      },
+    }
+  );
+}
+
+function renderTables(data) {
+  const hitl = data.hitl || {};
+  const rows = [
+    ['Cases created (window)', hitl.cases_created ?? 0],
+    ['Cases resolved', hitl.cases_resolved ?? 0],
+    ['Cases open', hitl.cases_open ?? 0],
+    [`Open beyond SLA (${data.sla_hours ?? 24}h)`, hitl.sla_breached_open ?? 0],
+    ['Oldest open case age', `${hitl.oldest_open_age_hours ?? 0} h`],
+    ['Avg resolution time',
+      data.decisions?.avg_resolution_hours == null ? '—' : `${data.decisions.avg_resolution_hours} h`],
+  ];
+  document.querySelector('#hitlTable tbody').innerHTML =
+    rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+
+  const dBody = document.querySelector('#decisionsTable tbody');
+  dBody.innerHTML = '';
+  for (const d of (data.recent_decisions || [])) {
+    const cls = d.decision === 'APPROVE' ? 'badge-approve'
+      : d.decision === 'REJECT' ? 'badge-reject' : 'badge-override';
+    const time = (d.timestamp || '').replace('T', ' ').split('.')[0];
+    dBody.innerHTML += `<tr>
+      <td>${time}</td>
+      <td>${d.case_id ? d.case_id.slice(0, 8) + '…' : '—'}</td>
+      <td><span class="badge ${cls}">${d.decision ?? '—'}</span></td>
+      <td>${d.reviewer ?? '—'}</td>
+    </tr>`;
+  }
+  if (!dBody.innerHTML) {
+    dBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">No decisions recorded yet.</td></tr>';
+  }
+}
+
+async function loadAll() {
+  try {
+    document.getElementById('loading').classList.remove('hidden');
+
+    const data = await fetchJson(`${API}/api/dashboard/audit-kpis?hours=168`);
+
+    renderKpis(data);
+    renderCharts(data);
+    renderTables(data);
+
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('lastUpdated').textContent =
+      `Last updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    document.getElementById('loading').classList.add('hidden');
+    toast('Error: ' + e.message);
+  }
+}
+
+document.getElementById('autoRefresh').addEventListener('change', (event) => {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  if (event.target.checked) refreshTimer = setInterval(loadAll, 30000);
+});
+
+if (document.getElementById('autoRefresh').checked) {
+  refreshTimer = setInterval(loadAll, 30000);
+}
+
+loadAll();
+</script>
+</body>
+</html>
