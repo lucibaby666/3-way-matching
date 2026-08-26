@@ -3,7 +3,7 @@ Azure platform metrics for the monitoring dashboard.
 
 Queries Azure Monitor platform metrics for the Document
 Intelligence account and the Storage account using the
-azure-monitor-querymetrics SDK.
+azure-mgmt-monitor SDK (ARM metrics API).
 
 Configuration (all optional; when missing, that resource
 is reported as not configured):
@@ -18,24 +18,24 @@ is reported as not configured):
         Full resource ID of the storage account, e.g.
         /subscriptions/<sub>/resourceGroups/<rg>/providers/
         Microsoft.Storage/storageAccounts/<name>
+        (the blob service sub-resource is queried)
 
 Authentication uses DefaultAzureCredential (same as the
 existing blob storage backend). The caller needs the
 Monitoring Reader role on each resource.
 
-Metric names differ between API and portal labels, so a
-set of candidate names is tried per logical metric and
-failures are skipped silently.
+Metric names differ between resources and API versions, so
+unsupported names are dropped and failures are skipped.
 """
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from app.env import get_env
 
 DI_METRIC_CANDIDATES = [
-    "TotalPages",
-    "ProcessedDocumentPages",
+    "ProcessedPages",
     "TotalCalls",
     "SuccessfulCalls",
     "ClientErrors",
@@ -66,7 +66,11 @@ def get_azure_platform_metrics(
 
     end = datetime.now(timezone.utc)
     start = end - timedelta(hours=window_hours)
-    timespan = (start, end)
+    timespan = (
+        start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        + "/"
+        + end.strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
 
     return {
         "window_hours": window_hours,
@@ -78,12 +82,13 @@ def get_azure_platform_metrics(
             configured_hint="Set azure-di-resource-id.",
         ),
         "storage": _query_resource(
-            resource_id=get_env(
-                "AZURE_STORAGE_RESOURCE_ID"
+            resource_id=_blob_service_id(
+                get_env("AZURE_STORAGE_RESOURCE_ID")
             ),
             metric_candidates=STORAGE_BLOB_METRICS,
             namespace=(
                 "Microsoft.Storage/storageAccounts"
+                "/blobServices"
             ),
             timespan=timespan,
             configured_hint=(
@@ -96,6 +101,23 @@ def get_azure_platform_metrics(
 # ============================================================
 # INTERNAL HELPERS
 # ============================================================
+
+
+def _blob_service_id(resource_id: str | None) -> str | None:
+    if not resource_id:
+        return None
+
+    if resource_id.rstrip("/").endswith("blobServices/default"):
+        return resource_id
+
+    return resource_id.rstrip("/") + "/blobServices/default"
+
+
+def _subscription_id_from(resource_id: str) -> str | None:
+    match = re.search(
+        r"/subscriptions/([^/]+)", resource_id
+    )
+    return match.group(1) if match else None
 
 
 def _query_resource(
@@ -112,39 +134,45 @@ def _query_resource(
             "metrics": [],
         }
 
-    try:
-        from azure.identity import DefaultAzureCredential
-        from azure.monitor.querymetrics import (
-            MetricsClient,
-        )
-    except ImportError:
+    subscription_id = _subscription_id_from(resource_id)
+
+    if not subscription_id:
         return {
             "available": False,
             "reason": (
-                "azure-monitor-querymetrics is not installed."
+                "Invalid resource ID. Expected a full ID "
+                "starting with /subscriptions/."
             ),
             "metrics": [],
         }
 
     try:
-        region = (
-            get_env("AZURE_METRICS_REGION") or "southindia"
+        from azure.identity import DefaultAzureCredential
+        from azure.mgmt.monitor import (
+            MonitorManagementClient,
         )
-        client = MetricsClient(
-            endpoint=(
-                f"https://{region}"
-                ".metrics.monitor.azure.com"
+    except ImportError:
+        return {
+            "available": False,
+            "reason": (
+                "azure-mgmt-monitor is not installed."
             ),
+            "metrics": [],
+        }
+
+    try:
+        client = MonitorManagementClient(
             credential=DefaultAzureCredential(),
+            subscription_id=subscription_id,
         )
 
-        results = client.query_resources(
-            resource_ids=[resource_id],
-            metric_namespace=namespace,
-            metric_names=metric_candidates,
+        response = client.metrics.list(
+            resource_uri=resource_id,
             timespan=timespan,
-            granularity=timedelta(hours=1),
-            aggregations=["Total", "Average"],
+            interval="PT1H",
+            metricnames=",".join(metric_candidates),
+            metricnamespace=namespace,
+            aggregation="Total,Average",
         )
     except Exception as error:
         return {
@@ -154,19 +182,10 @@ def _query_resource(
             "metrics": [],
         }
 
-    response = results[0] if results else None
-
-    if response is None:
-        return {
-            "available": False,
-            "reason": "No metrics returned for this resource.",
-            "metrics": [],
-        }
-
     metrics: List[Dict[str, Any]] = []
 
-    for metric in response.metrics:
-        name = getattr(metric, "name", None)
+    for metric in response.value:
+        name = getattr(getattr(metric, "name", None), "value", None)
 
         points: List[Dict[str, Any]] = []
         total = 0.0
@@ -176,7 +195,7 @@ def _query_resource(
 
         for series in metric.timeseries:
             for value in series.data:
-                timestamp = getattr(value, "timestamp", None)
+                timestamp = getattr(value, "time_stamp", None)
 
                 point: Dict[str, Any] = {
                     "timestamp": timestamp.isoformat()
@@ -210,9 +229,7 @@ def _query_resource(
 
         entry: Dict[str, Any] = {
             "name": name,
-            "display_name": getattr(
-                metric, "display_name", name
-            ),
+            "display_name": name,
             "unit": str(getattr(metric, "unit", ""))
             or None,
             "points": points,

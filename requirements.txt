@@ -4,7 +4,7 @@ uvicorn[standard]
 python-dotenv
 azure-identity
 azure-storage-blob
-azure-monitor-querymetrics
+azure-mgmt-monitor
 azure-ai-projects
 azure-ai-documentintelligence
 pydantic
