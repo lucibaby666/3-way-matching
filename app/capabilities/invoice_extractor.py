@@ -1,12 +1,10 @@
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
-
-from app.env import get_env
-from app.storage.document_io import open_document_stream
-from app.storage.document_storage import DocumentStorage
 
 
 load_dotenv()
@@ -22,23 +20,18 @@ class InvoiceExtractor:
     This is NOT the canonical Invoice domain model.
     """
 
-    def __init__(
-        self,
-        storage: DocumentStorage | None = None,
-    ):
-        self.storage = storage
-
-        endpoint = get_env("DOCUMENT_INTELLIGENCE_ENDPOINT")
-        api_key = get_env("DOCUMENT_INTELLIGENCE_API_KEY")
+    def __init__(self):
+        endpoint = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
+        api_key = os.getenv("DOCUMENT_INTELLIGENCE_API_KEY")
 
         if not endpoint:
             raise ValueError(
-                "document-intelligence-endpoint is not configured."
+                "DOCUMENT_INTELLIGENCE_ENDPOINT is not configured."
             )
 
         if not api_key:
             raise ValueError(
-                "document-intelligence-api-key is not configured."
+                "DOCUMENT_INTELLIGENCE_API_KEY is not configured."
             )
 
         self.client = DocumentIntelligenceClient(
@@ -54,15 +47,23 @@ class InvoiceExtractor:
         containing extracted values and source locations.
         """
 
-        document = open_document_stream(
-            document_path,
-            storage=self.storage,
-        )
+        path = Path(document_path)
 
-        poller = self.client.begin_analyze_document(
-            "prebuilt-invoice",
-            body=document,
-        )
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Document not found: {document_path}"
+            )
+
+        if not path.is_file():
+            raise ValueError(
+                f"Document path is not a file: {document_path}"
+            )
+
+        with path.open("rb") as document:
+            poller = self.client.begin_analyze_document(
+                "prebuilt-invoice",
+                body=document,
+            )
 
         result = poller.result()
 
@@ -74,19 +75,8 @@ class InvoiceExtractor:
         document_result = result.documents[0]
         fields = document_result.fields
 
-        line_items = self._extract_line_items(
-            fields.get("Items")
-        )
-
-        if self._line_items_are_merged(line_items):
-            line_items = (
-                self._extract_line_items_from_tables(
-                    result.tables
-                )
-            )
-
         return {
-            "document_path": document_path,
+            "document_path": str(path),
 
             "invoice_number": self._get_field_with_source(
                 fields,
@@ -133,7 +123,9 @@ class InvoiceExtractor:
                 "InvoiceTotal",
             ),
 
-            "line_items": line_items,
+            "line_items": self._extract_line_items(
+                fields.get("Items")
+            ),
         }
 
     @staticmethod
@@ -340,289 +332,3 @@ class InvoiceExtractor:
             )
 
         return line_items
-
-    @staticmethod
-    def _line_items_are_merged(
-        line_items: List[Dict[str, Any]],
-    ) -> bool:
-        """
-        Detect rows merged by the prebuilt model, where
-        several item codes were collapsed into a single
-        line item value.
-        """
-
-        for item in line_items:
-
-            value = (
-                item.get("item_code", {}).get("value")
-            )
-
-            if isinstance(value, str) and "\n" in value:
-                return True
-
-        return False
-
-    def _extract_line_items_from_tables(
-        self,
-        tables: Optional[List[Any]],
-    ) -> List[Dict[str, Any]]:
-        """
-        Rebuild line items from document tables when the
-        prebuilt invoice Items field merged table rows.
-
-        Uses the same analysis result, so no additional
-        extraction call is required.
-        """
-
-        if not tables:
-            return []
-
-        for table in tables:
-
-            columns = self._table_columns(table)
-
-            if "item_code" not in columns:
-                continue
-
-            return self._table_rows_to_line_items(
-                table,
-                columns,
-            )
-
-        return []
-
-    @staticmethod
-    def _normalize_header(
-        content: Any,
-    ) -> str:
-        text = str(content or "").strip().lower()
-
-        if "(" in text:
-            text = text.split("(")[0].strip()
-
-        return text
-
-    def _table_columns(
-        self,
-        table: Any,
-    ) -> Dict[str, int]:
-        columns: Dict[str, int] = {}
-
-        header_rules = [
-            ("item_code", "item code"),
-            ("description", "description"),
-            ("unit_price", "unit price"),
-            ("quantity", "qty"),
-            ("quantity", "quantity"),
-            ("amount", "amount"),
-            ("unit", "unit"),
-        ]
-
-        for cell in table.cells:
-
-            if cell.row_index != 0:
-                continue
-
-            normalized = self._normalize_header(
-                cell.content
-            )
-
-            if not normalized:
-                continue
-
-            for name, token in header_rules:
-
-                if name in columns:
-                    continue
-
-                if token in normalized:
-                    columns[name] = cell.column_index
-                    break
-
-        return columns
-
-    def _table_rows_to_line_items(
-        self,
-        table: Any,
-        columns: Dict[str, int],
-    ) -> List[Dict[str, Any]]:
-
-        cells_by_position = {
-            (cell.row_index, cell.column_index): cell
-            for cell in table.cells
-        }
-
-        row_cells: Dict[int, List[Any]] = {}
-
-        for cell in table.cells:
-            row_cells.setdefault(
-                cell.row_index,
-                [],
-            ).append(cell)
-
-        line_items = []
-
-        for row_index in sorted(row_cells):
-
-            if row_index == 0:
-                continue
-
-            item_code_cell = (
-                cells_by_position.get(
-                    (
-                        row_index,
-                        columns["item_code"],
-                    )
-                )
-            )
-
-            if item_code_cell is None:
-                continue
-
-            if not (
-                item_code_cell.content or ""
-            ).strip():
-                continue
-
-            union_source = (
-                self._row_union_region(
-                    row_cells[row_index]
-                )
-            )
-
-            line_item: Dict[str, Any] = {}
-
-            for name in (
-                "item_code",
-                "description",
-                "quantity",
-                "unit",
-                "unit_price",
-                "amount",
-            ):
-
-                column_index = columns.get(name)
-
-                cell = (
-                    cells_by_position.get(
-                        (
-                            row_index,
-                            column_index,
-                        )
-                    )
-                    if column_index is not None
-                    else None
-                )
-
-                source = (
-                    union_source
-                    if name == "quantity"
-                    else self._cell_region(cell)
-                )
-
-                line_item[name] = {
-                    "value": (
-                        cell.content.strip()
-                        if cell is not None
-                        and cell.content
-                        else None
-                    ),
-                    "source": source,
-                }
-
-            line_items.append(line_item)
-
-        return line_items
-
-    @staticmethod
-    def _cell_region(
-        cell: Optional[Any],
-    ) -> List[Dict[str, Any]]:
-        """
-        Convert one table cell bounding region into
-        our lightweight source-location representation.
-        """
-
-        if cell is None or not cell.bounding_regions:
-            return []
-
-        region = cell.bounding_regions[0]
-
-        return [
-            {
-                "page_number": region.page_number,
-                "polygon": [
-                    {
-                        "x": region.polygon[i],
-                        "y": region.polygon[i + 1],
-                    }
-                    for i in range(
-                        0,
-                        len(region.polygon),
-                        2,
-                    )
-                ],
-            }
-        ]
-
-    def _row_union_region(
-        self,
-        row_cells: List[Any],
-    ) -> List[Dict[str, Any]]:
-        """
-        Build one polygon covering an entire table row so
-        whole-row evidence shows every column.
-        """
-
-        regions = [
-            cell.bounding_regions[0]
-            for cell in row_cells
-            if cell.bounding_regions
-        ]
-
-        if not regions:
-            return []
-
-        page_numbers = {
-            region.page_number
-            for region in regions
-        }
-
-        if len(page_numbers) > 1:
-            return self._cell_region(row_cells[0])
-
-        points: List[Dict[str, float]] = []
-
-        for region in regions:
-            polygon = region.polygon
-
-            points.extend(
-                {
-                    "x": polygon[i],
-                    "y": polygon[i + 1],
-                }
-                for i in range(
-                    0,
-                    len(polygon),
-                    2,
-                )
-            )
-
-        min_x = min(p["x"] for p in points)
-        max_x = max(p["x"] for p in points)
-        min_y = min(p["y"] for p in points)
-        max_y = max(p["y"] for p in points)
-
-        return [
-            {
-                "page_number": (
-                    regions[0].page_number
-                ),
-                "polygon": [
-                    {"x": min_x, "y": min_y},
-                    {"x": max_x, "y": min_y},
-                    {"x": max_x, "y": max_y},
-                    {"x": min_x, "y": max_y},
-                ],
-            }
-        ]

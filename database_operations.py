@@ -1,0 +1,304 @@
+# database_operations.py
+import json
+import pyodbc
+from datetime import datetime
+import logging
+
+# Setup logger for database operations
+logger = logging.getLogger("ThreeWayMatching")
+
+# Import database configuration
+try:
+    from db_config import DB_CONFIG
+except ImportError:
+    DB_CONFIG = {
+        'driver': '{ODBC Driver 17 for SQL Server}',
+        'server': 'DESKTOP-00TGE83\\SQLEXPRESS',
+        'database': 'threeway_matching',
+        'trusted_connection': 'yes'
+    }
+
+
+def get_db_connection():
+    """Get SQL Server database connection"""
+    try:
+        if DB_CONFIG.get('trusted_connection') == 'yes':
+            conn_str = f"DRIVER={DB_CONFIG['driver']};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};Trusted_Connection=yes"
+        else:
+            conn_str = f"DRIVER={DB_CONFIG['driver']};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};UID={DB_CONFIG['uid']};PWD={DB_CONFIG['pwd']}"
+        
+        connection = pyodbc.connect(conn_str, timeout=30)
+        return connection
+    except Exception as e:
+        print(f"⚠️ Database connection failed: {e}")
+        logger.error(f"Database connection failed: {e}")
+        return None
+
+
+def create_audit_tables():
+    """Create audit tables if they don't exist"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Create audit_logs table
+        cursor.execute("""
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'audit_logs')
+            CREATE TABLE audit_logs (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                audit_id NVARCHAR(100) NOT NULL,
+                event_type NVARCHAR(100) NOT NULL,
+                severity NVARCHAR(50) NOT NULL,
+                [user] NVARCHAR(100),
+                action NVARCHAR(500),
+                resource NVARCHAR(500),
+                resource_type NVARCHAR(100),
+                status NVARCHAR(50),
+                error NVARCHAR(MAX),
+                metadata NVARCHAR(MAX),
+                raw_data NVARCHAR(MAX),
+                inserted_at DATETIME DEFAULT GETDATE()
+            )
+        """)
+        
+        # Alter existing table columns if needed
+        cursor.execute("""
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'audit_logs')
+            BEGIN
+                BEGIN TRY
+                    ALTER TABLE audit_logs ALTER COLUMN audit_id NVARCHAR(100)
+                END TRY
+                BEGIN CATCH
+                    -- Column might not exist or already has correct type
+                END CATCH
+                BEGIN TRY
+                    ALTER TABLE audit_logs ALTER COLUMN event_type NVARCHAR(100)
+                END TRY
+                BEGIN CATCH
+                    -- Column might not exist or already has correct type
+                END CATCH
+                BEGIN TRY
+                    ALTER TABLE audit_logs ALTER COLUMN [user] NVARCHAR(100)
+                END TRY
+                BEGIN CATCH
+                    -- Column might not exist or already has correct type
+                END CATCH
+                BEGIN TRY
+                    ALTER TABLE audit_logs ALTER COLUMN action NVARCHAR(500)
+                END TRY
+                BEGIN CATCH
+                    -- Column might not exist or already has correct type
+                END CATCH
+                BEGIN TRY
+                    ALTER TABLE audit_logs ALTER COLUMN resource NVARCHAR(500)
+                END TRY
+                BEGIN CATCH
+                    -- Column might not exist or already has correct type
+                END CATCH
+                BEGIN TRY
+                    ALTER TABLE audit_logs ALTER COLUMN resource_type NVARCHAR(100)
+                END TRY
+                BEGIN CATCH
+                    -- Column might not exist or already has correct type
+                END CATCH
+                BEGIN TRY
+                    ALTER TABLE audit_logs ALTER COLUMN status NVARCHAR(50)
+                END TRY
+                BEGIN CATCH
+                    -- Column might not exist or already has correct type
+                END CATCH
+            END
+        """)
+        
+        # Create audit_statistics table
+        cursor.execute("""
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'audit_statistics')
+            CREATE TABLE audit_statistics (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                run_id NVARCHAR(100),
+                generated_at DATETIME,
+                total_entries INT,
+                info_count INT,
+                warning_count INT,
+                high_count INT,
+                critical_count INT,
+                status_success INT,
+                status_failed INT,
+                matching_status NVARCHAR(50),
+                exception_count INT,
+                hitl_case_id NVARCHAR(100),
+                evidence_dir NVARCHAR(500),
+                inserted_at DATETIME DEFAULT GETDATE()
+            )
+        """)
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ Table creation warning: {e}")
+        logger.warning(f"Table creation warning: {e}")
+        conn.close()
+        return True
+
+
+def insert_audit_to_db(audit_entry):
+    """Insert an audit entry into the database"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return False
+        
+        cursor = conn.cursor()
+        
+        metadata_json = json.dumps(audit_entry.get('metadata', {}))
+        raw_data_json = json.dumps(audit_entry)
+        
+        cursor.execute("""
+            INSERT INTO audit_logs 
+            (audit_id, event_type, severity, [user], action, 
+             resource, resource_type, status, error, metadata, raw_data, inserted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            str(audit_entry.get('audit_id', ''))[:20],
+            str(audit_entry.get('event_type', ''))[:50],
+            str(audit_entry.get('severity', 'INFO'))[:20],
+            str(audit_entry.get('user', 'system'))[:50],
+            str(audit_entry.get('action', ''))[:200],
+            str(audit_entry.get('resource', ''))[:200],
+            str(audit_entry.get('resource_type', ''))[:50],
+            str(audit_entry.get('status', 'SUCCESS'))[:20],
+            str(audit_entry.get('error', '')) if audit_entry.get('error') else None,
+            metadata_json,
+            raw_data_json,
+            datetime.now()
+        ))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Failed to insert audit: {e}")
+        logger.error(f"Failed to insert audit: {e}")
+        if 'conn' in locals():
+            conn.close()
+        return False
+
+
+def insert_statistics_to_db(stats):
+    """Insert statistics into the database"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        run_id = f"RUN-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        cursor.execute("""
+            INSERT INTO audit_statistics 
+            (run_id, generated_at, total_entries, info_count, warning_count, high_count, critical_count,
+             status_success, status_failed, matching_status, exception_count, hitl_case_id, evidence_dir)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            run_id,
+            datetime.now(),
+            stats.get('total_entries', 0),
+            stats.get('severity_counts', {}).get('INFO', 0),
+            stats.get('severity_counts', {}).get('WARNING', 0),
+            stats.get('severity_counts', {}).get('HIGH', 0),
+            stats.get('severity_counts', {}).get('CRITICAL', 0),
+            stats.get('status_counts', {}).get('SUCCESS', 0),
+            stats.get('status_counts', {}).get('FAILED', 0),
+            stats.get('matching_status', 'UNKNOWN'),
+            stats.get('exception_count', 0),
+            stats.get('hitl_case_id', None),
+            stats.get('evidence_dir', '')
+        ))
+        
+        conn.commit()
+        conn.close()
+        return run_id
+    except Exception as e:
+        print(f"⚠️ Failed to insert statistics: {e}")
+        logger.error(f"Failed to insert statistics: {e}")
+        conn.close()
+        return None
+
+
+def verify_database_connection():
+    """Verify database connection and return status"""
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT @@VERSION")
+            version = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            return True, "Connected successfully"
+        except Exception as e:
+            conn.close()
+            return False, str(e)
+    return False, "Connection failed"
+
+
+def get_audit_count():
+    """Get total count of audit logs"""
+    conn = get_db_connection()
+    if not conn:
+        return 0
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM audit_logs")
+        count = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return count
+    except Exception as e:
+        print(f"⚠️ Failed to get audit count: {e}")
+        conn.close()
+        return 0
+
+
+def get_recent_audit_logs(limit=100):
+    """Get recent audit logs"""
+    conn = get_db_connection()
+    if not conn:
+        return []
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT TOP ? 
+                audit_id, event_type, severity, [user], action, 
+                status, inserted_at
+            FROM audit_logs
+            ORDER BY inserted_at DESC
+        """, (limit,))
+        
+        logs = []
+        for row in cursor.fetchall():
+            logs.append({
+                'audit_id': row[0],
+                'event_type': row[1],
+                'severity': row[2],
+                'user': row[3],
+                'action': row[4],
+                'status': row[5],
+                'inserted_at': row[6]
+            })
+        
+        cursor.close()
+        conn.close()
+        return logs
+    except Exception as e:
+        print(f"⚠️ Failed to get audit logs: {e}")
+        conn.close()
+        return []
