@@ -3,7 +3,7 @@ Azure platform metrics for the monitoring dashboard.
 
 Queries Azure Monitor platform metrics for the Document
 Intelligence account and the Storage account using the
-azure-monitor-query SDK.
+azure-monitor-querymetrics SDK.
 
 Configuration (all optional; when missing, that resource
 is reported as not configured):
@@ -34,18 +34,13 @@ from typing import Any, Dict, List
 from app.env import get_env
 
 DI_METRIC_CANDIDATES = [
-    "PagesProcessed",
-    "Pages Processed",
+    "TotalPages",
+    "ProcessedDocumentPages",
     "TotalCalls",
-    "Total Calls",
     "SuccessfulCalls",
-    "Successful Calls",
     "ClientErrors",
-    "Client Errors",
     "ServerErrors",
-    "Server Errors",
     "Latency",
-    "Overall Latency In Milliseconds",
 ]
 
 STORAGE_BLOB_METRICS = [
@@ -69,12 +64,9 @@ def get_azure_platform_metrics(
     metrics or an explanation of why none are available.
     """
 
-    timespan = (
-        datetime.now(timezone.utc)
-        - timedelta(hours=window_hours)
-    ).strftime("%Y-%m-%dT%H:%M:%SZ") + "/" + (
-        datetime.now(timezone.utc)
-    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=window_hours)
+    timespan = (start, end)
 
     return {
         "window_hours": window_hours,
@@ -91,7 +83,7 @@ def get_azure_platform_metrics(
             ),
             metric_candidates=STORAGE_BLOB_METRICS,
             namespace=(
-                "Microsoft.Storage/storageServices/blobServices"
+                "Microsoft.Storage/storageAccounts"
             ),
             timespan=timespan,
             configured_hint=(
@@ -122,27 +114,36 @@ def _query_resource(
 
     try:
         from azure.identity import DefaultAzureCredential
-        from azure.monitor.query import MetricsQueryClient
+        from azure.monitor.querymetrics import (
+            MetricsClient,
+        )
     except ImportError:
         return {
             "available": False,
             "reason": (
-                "azure-monitor-query is not installed."
+                "azure-monitor-querymetrics is not installed."
             ),
             "metrics": [],
         }
 
     try:
-        client = MetricsQueryClient(
-            DefaultAzureCredential()
+        region = (
+            get_env("AZURE_METRICS_REGION") or "southindia"
+        )
+        client = MetricsClient(
+            endpoint=(
+                f"https://{region}"
+                ".metrics.monitor.azure.com"
+            ),
+            credential=DefaultAzureCredential(),
         )
 
-        response = client.query_resource(
-            resource_uri=resource_id,
+        results = client.query_resources(
+            resource_ids=[resource_id],
+            metric_namespace=namespace,
             metric_names=metric_candidates,
             timespan=timespan,
-            interval=timedelta(hours=1),
-            namespace=namespace,
+            granularity=timedelta(hours=1),
             aggregations=["Total", "Average"],
         )
     except Exception as error:
@@ -153,9 +154,20 @@ def _query_resource(
             "metrics": [],
         }
 
+    response = results[0] if results else None
+
+    if response is None:
+        return {
+            "available": False,
+            "reason": "No metrics returned for this resource.",
+            "metrics": [],
+        }
+
     metrics: List[Dict[str, Any]] = []
 
-    for name, metric in response.metrics.items():
+    for metric in response.metrics:
+        name = getattr(metric, "name", None)
+
         points: List[Dict[str, Any]] = []
         total = 0.0
         has_total = False
