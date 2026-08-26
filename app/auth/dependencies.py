@@ -8,7 +8,7 @@ browser receives an HTTP-only session cookie.
 
 import secrets
 import threading
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 
 from fastapi import Depends, HTTPException, Request, status
 
@@ -68,7 +68,7 @@ def get_current_user(
     return user
 
 
-def require_any_role(*roles: str):
+def require_any_role(*roles: Set[str]):
     allowed = {role.upper() for role in roles}
 
     def dependency(
