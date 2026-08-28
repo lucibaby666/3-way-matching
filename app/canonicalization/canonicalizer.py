@@ -53,7 +53,7 @@ class Canonicalizer:
         Convert ContractExtractor output into Contract.
         """
 
-        document_path = extracted["document_path"]
+        document_path = extracted.get("document_path", "")
 
         return Contract(
             contract_id=document_id,
@@ -123,7 +123,7 @@ class Canonicalizer:
         the canonical PurchaseOrder model.
         """
     
-        document_path = extracted["document_path"]
+        document_path = extracted.get("document_path", "")
     
         return PurchaseOrder(
             po_id=document_id,
@@ -176,7 +176,7 @@ class Canonicalizer:
         Convert InvoiceExtractor output into Invoice.
         """
 
-        document_path = extracted["document_path"]
+        document_path = extracted.get("document_path", "")
 
         return Invoice(
             invoice_id=document_id,

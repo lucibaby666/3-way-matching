@@ -20,63 +20,76 @@ class InvoiceExtractor:
     This is NOT the canonical Invoice domain model.
     """
 
-    def __init__(self):
+    def __init__(self, storage: Any = None):
+        self.storage = storage
+        use_local = os.getenv("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
         endpoint = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
         api_key = os.getenv("DOCUMENT_INTELLIGENCE_API_KEY")
 
-        if not endpoint:
-            raise ValueError(
-                "DOCUMENT_INTELLIGENCE_ENDPOINT is not configured."
-            )
+        if not use_local and endpoint and api_key:
+            try:
+                self.client = DocumentIntelligenceClient(
+                    endpoint=endpoint,
+                    credential=AzureKeyCredential(api_key),
+                    retry_total=0,
+                    retry_backoff_factor=0,
+                    retry_backoff_max=0,
+                )
+            except Exception as e:
+                logger.warning(f"Could not initialize Azure DI Client: {e}")
+                self.client = None
+        else:
+            self.client = None
 
-        if not api_key:
-            raise ValueError(
-                "DOCUMENT_INTELLIGENCE_API_KEY is not configured."
-            )
-
-        self.client = DocumentIntelligenceClient(
-            endpoint=endpoint,
-            credential=AzureKeyCredential(api_key),
-        )
-
-    def extract_invoice(self, document_path: str) -> Dict[str, Any]:
+    def extract_invoice(self, document_path: str, storage: Any = None) -> Dict[str, Any]:
         """
         Extract invoice information using Azure Document Intelligence.
 
         Returns a lightweight application-level representation
         containing extracted values and source locations.
         """
+        effective_storage = storage or self.storage
+        if effective_storage and effective_storage.exists(document_path):
+            doc_bytes = effective_storage.read_bytes(document_path)
+        else:
+            path = Path(document_path)
+            if path.exists() and path.is_file():
+                doc_bytes = path.read_bytes()
+            elif (Path("data") / document_path).exists() and (Path("data") / document_path).is_file():
+                doc_bytes = (Path("data") / document_path).read_bytes()
+            else:
+                try:
+                    from app.storage.document_io import read_document_bytes
+                    doc_bytes = read_document_bytes(document_path, storage=effective_storage)
+                except Exception:
+                    raise FileNotFoundError(
+                        f"Document not found: {document_path}"
+                    )
 
-        path = Path(document_path)
+        result = None
+        if self.client:
+            try:
+                poller = self.client.begin_analyze_document(
+                    "prebuilt-invoice",
+                    body=doc_bytes,
+                    polling_interval=1,
+                )
+                result = poller.result()
+            except Exception as err:
+                logger.warning(
+                    f"Azure Document Intelligence error ({err}). Switching to fast local extractor."
+                )
+                self.client = None  # Circuit breaker
 
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Document not found: {document_path}"
-            )
-
-        if not path.is_file():
-            raise ValueError(
-                f"Document path is not a file: {document_path}"
-            )
-
-        with path.open("rb") as document:
-            poller = self.client.begin_analyze_document(
-                "prebuilt-invoice",
-                body=document,
-            )
-
-        result = poller.result()
-
-        if not result.documents:
-            raise ValueError(
-                f"No invoice document was detected: {document_path}"
-            )
+        if result is None or not getattr(result, "documents", None):
+            from app.capabilities.local_pdf_extractor import extract_invoice_locally
+            return extract_invoice_locally(doc_bytes, document_path)
 
         document_result = result.documents[0]
         fields = document_result.fields
 
         return {
-            "document_path": str(path),
+            "document_path": str(document_path),
 
             "invoice_number": self._get_field_with_source(
                 fields,

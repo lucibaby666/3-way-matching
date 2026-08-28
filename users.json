@@ -9,6 +9,11 @@
       "username": "audit",
       "role": "AUDIT",
       "password_hash": "pbkdf2_sha256$390000$cdad8dbe15fdaf9af9614ea853beb255$a3b9205dc8a3e378e78de5a6da3da2e4a716461b5ce2998cbb14f5f67a654b87"
+    },
+    {
+      "username": "umarwani484@gmail.com",
+      "role": "ADMIN",
+      "password_hash": "pbkdf2_sha256$390000$09c57b99c23e566fa11e5fc8dc915009$31a67d75410a11332eb9ae5547ae23ec54297de01834a50b2867e6f145044000"
     }
   ]
 }

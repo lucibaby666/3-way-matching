@@ -1,5 +1,6 @@
 # logging_operations.py
 import json
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -13,12 +14,16 @@ logger = setup_logging(name="ThreeWayMatching", log_dir="./logs")
 
 
 def log_and_insert(event_type, action, severity=AuditSeverity.INFO, status="SUCCESS", 
-                   resource="", resource_type="", error=None, metadata=None, user="system"):
+                   resource="", resource_type="", error=None, metadata=None, user="system",
+                   audit_id_prefix="AUDIT"):
     """Log and insert into database simultaneously"""
+    
+    unique_suffix = uuid.uuid4().hex[:6]
+    audit_id = f"{audit_id_prefix}-{datetime.now().strftime('%Y%m%d_%H%M%S')}_{unique_suffix}"
     
     # Create audit entry
     audit_entry = {
-        "audit_id": f"HITL-{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        "audit_id": audit_id,
         "event_type": event_type,
         "severity": severity.value if hasattr(severity, 'value') else str(severity),
         "user": user,
@@ -31,15 +36,7 @@ def log_and_insert(event_type, action, severity=AuditSeverity.INFO, status="SUCC
         "timestamp": datetime.now().isoformat()
     }
     
-    # Log to file
-    if severity == AuditSeverity.INFO:
-        logger.info(f"{event_type} - {action} - {status}")
-    elif severity == AuditSeverity.WARNING:
-        logger.warning(f"{event_type} - {action} - {status}")
-    elif severity in [AuditSeverity.HIGH, AuditSeverity.CRITICAL]:
-        logger.error(f"{event_type} - {action} - {status}")
-    
-    # Also log with the logger's log method
+    # Log with the logger's log method (handles file & console formatting)
     logger.log(
         event_type=event_type,
         action=action,
@@ -58,4 +55,4 @@ def log_and_insert(event_type, action, severity=AuditSeverity.INFO, status="SUCC
         print(f"⚠️ Could not insert audit to DB: {e}")
     
     # Return audit_entry and statistics update info for tracking
-    return audit_entry
+    return audit_entry

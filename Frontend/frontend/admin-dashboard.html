@@ -200,6 +200,8 @@ function renderSummary(data) {
       `${totals.with_exceptions ?? 0} run(s) with exceptions`),
     kpiCard('Open HITL Cases', totals.open_hitl_cases ?? 0,
       `${totals.hitl_cases_created ?? 0} created in window`),
+    kpiCard('ChromaDB Vectors', (data.smart_approval?.chromadb_vectors ?? '—'),
+      'Exception precedent vectors stored'),
     kpiCard('Avg Duration',
       data.avg_duration_ms == null ? '—' : `${Math.round(data.avg_duration_ms)} ms`,
       `${totals.documents_processed ?? 0} documents processed`),
@@ -258,6 +260,7 @@ function renderSummary(data) {
   const sBody = document.querySelector('#systemTable tbody');
   sBody.innerHTML = `
     <tr><td>Service uptime</td><td>${Math.floor((sys.uptime_seconds ?? 0) / 60)} min</td></tr>
+    <tr><td>Smart Approval AI</td><td>Active (ChromaDB + Cosine Sim)</td></tr>
     <tr><td>Document storage mode</td><td>${sys.document_storage ?? '—'}</td></tr>
     <tr><td>Run history backend</td><td>${sys.run_history_backend ?? '—'}</td></tr>
     <tr><td>Azure configured</td><td>${sys.azure_configured ? 'Yes' : 'No'}</td></tr>

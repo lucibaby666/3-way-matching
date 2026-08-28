@@ -1,3 +1,5 @@
+# app/capabilities/document_set_loader.py
+import concurrent.futures
 from typing import Any
 
 from app.canonicalization.canonicalizer import Canonicalizer
@@ -31,15 +33,11 @@ class DocumentSetLoader:
         )
         self.storage = self.intake.storage
         self.canonicalizer = Canonicalizer()
-        self.contract_extractor = ContractExtractor(
-            storage=self.storage
-        )
-        self.purchase_order_extractor = PurchaseOrderExtractor(
-            storage=self.storage
-        )
-        self.invoice_extractor = InvoiceExtractor(
-            storage=self.storage
-        )
+        
+        # Initialize extractors with active storage backend
+        self.contract_extractor = ContractExtractor(storage=self.storage)
+        self.purchase_order_extractor = PurchaseOrderExtractor(storage=self.storage)
+        self.invoice_extractor = InvoiceExtractor(storage=self.storage)
 
     def load(
         self,
@@ -63,41 +61,34 @@ class DocumentSetLoader:
         extracted_purchase_orders = []
         extracted_invoices = []
 
-        for document in documents["contracts"]:
-            extracted = self.contract_extractor.extract_contract(
-                document["path"]
-            )
+        # Process documents in sequence to stay within Azure Free Tier (F0) concurrency limits
+        for doc in documents["contracts"]:
+            extracted = self.contract_extractor.extract_contract(doc["path"])
             extracted_contracts.append(extracted)
             contracts.append(
                 self.canonicalizer.canonicalize_contract(
                     extracted,
-                    document_id=document["document_id"],
+                    document_id=doc["document_id"],
                 )
             )
 
-        for document in documents["purchase_orders"]:
-            extracted = (
-                self.purchase_order_extractor.extract_purchase_order(
-                    document["path"]
-                )
-            )
+        for doc in documents["purchase_orders"]:
+            extracted = self.purchase_order_extractor.extract_purchase_order(doc["path"])
             extracted_purchase_orders.append(extracted)
             purchase_orders.append(
                 self.canonicalizer.canonicalize_purchase_order(
                     extracted,
-                    document_id=document["document_id"],
+                    document_id=doc["document_id"],
                 )
             )
 
-        for document in documents["invoices"]:
-            extracted = self.invoice_extractor.extract_invoice(
-                document["path"]
-            )
+        for doc in documents["invoices"]:
+            extracted = self.invoice_extractor.extract_invoice(doc["path"])
             extracted_invoices.append(extracted)
             invoices.append(
                 self.canonicalizer.canonicalize_invoice(
                     extracted,
-                    document_id=document["document_id"],
+                    document_id=doc["document_id"],
                 )
             )
 
@@ -111,4 +102,4 @@ class DocumentSetLoader:
             "contracts": contracts,
             "purchase_orders": purchase_orders,
             "invoices": invoices,
-        }
+        }

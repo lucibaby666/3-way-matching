@@ -147,6 +147,7 @@ def create_audit_tables():
 
 def insert_audit_to_db(audit_entry):
     """Insert an audit entry into the database"""
+    conn = None
     try:
         conn = get_db_connection()
         if not conn:
@@ -163,14 +164,14 @@ def insert_audit_to_db(audit_entry):
              resource, resource_type, status, error, metadata, raw_data, inserted_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            str(audit_entry.get('audit_id', ''))[:20],
-            str(audit_entry.get('event_type', ''))[:50],
-            str(audit_entry.get('severity', 'INFO'))[:20],
-            str(audit_entry.get('user', 'system'))[:50],
-            str(audit_entry.get('action', ''))[:200],
-            str(audit_entry.get('resource', ''))[:200],
-            str(audit_entry.get('resource_type', ''))[:50],
-            str(audit_entry.get('status', 'SUCCESS'))[:20],
+            str(audit_entry.get('audit_id', ''))[:100],
+            str(audit_entry.get('event_type', ''))[:100],
+            str(audit_entry.get('severity', 'INFO'))[:50],
+            str(audit_entry.get('user', 'system'))[:100],
+            str(audit_entry.get('action', ''))[:500],
+            str(audit_entry.get('resource', ''))[:500],
+            str(audit_entry.get('resource_type', ''))[:100],
+            str(audit_entry.get('status', 'SUCCESS'))[:50],
             str(audit_entry.get('error', '')) if audit_entry.get('error') else None,
             metadata_json,
             raw_data_json,
@@ -178,15 +179,19 @@ def insert_audit_to_db(audit_entry):
         ))
         
         conn.commit()
-        conn.close()
+        cursor.close()
         return True
         
     except Exception as e:
         print(f"⚠️ Failed to insert audit: {e}")
         logger.error(f"Failed to insert audit: {e}")
-        if 'conn' in locals():
-            conn.close()
         return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def insert_statistics_to_db(stats):

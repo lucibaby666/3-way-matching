@@ -21,57 +21,76 @@ class PurchaseOrderExtractor:
     This is NOT the canonical PurchaseOrder model.
     """
 
-    def __init__(self):
+    def __init__(self, storage: Any = None):
+        self.storage = storage
+        use_local = os.getenv("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
         endpoint = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
         api_key = os.getenv("DOCUMENT_INTELLIGENCE_API_KEY")
 
-        if not endpoint:
-            raise ValueError(
-                "DOCUMENT_INTELLIGENCE_ENDPOINT is not configured."
-            )
-
-        if not api_key:
-            raise ValueError(
-                "DOCUMENT_INTELLIGENCE_API_KEY is not configured."
-            )
-
-        self.client = DocumentIntelligenceClient(
-            endpoint=endpoint,
-            credential=AzureKeyCredential(api_key),
-        )
+        if not use_local and endpoint and api_key:
+            try:
+                self.client = DocumentIntelligenceClient(
+                    endpoint=endpoint,
+                    credential=AzureKeyCredential(api_key),
+                    retry_total=0,
+                    retry_backoff_factor=0,
+                    retry_backoff_max=0,
+                )
+            except Exception as e:
+                logger.warning(f"Could not initialize Azure DI Client: {e}")
+                self.client = None
+        else:
+            self.client = None
 
     def extract_purchase_order(
         self,
         document_path: str,
+        storage: Any = None,
     ) -> Dict[str, Any]:
         """
         Extract Purchase Order information.
         """
+        effective_storage = storage or self.storage
+        if effective_storage and effective_storage.exists(document_path):
+            doc_bytes = effective_storage.read_bytes(document_path)
+        else:
+            path = Path(document_path)
+            if path.exists() and path.is_file():
+                doc_bytes = path.read_bytes()
+            elif (Path("data") / document_path).exists() and (Path("data") / document_path).is_file():
+                doc_bytes = (Path("data") / document_path).read_bytes()
+            else:
+                try:
+                    from app.storage.document_io import read_document_bytes
+                    doc_bytes = read_document_bytes(document_path, storage=effective_storage)
+                except Exception:
+                    raise FileNotFoundError(
+                        f"Document not found: {document_path}"
+                    )
 
-        path = Path(document_path)
+        result = None
+        if self.client:
+            try:
+                poller = self.client.begin_analyze_document(
+                    "prebuilt-layout",
+                    body=doc_bytes,
+                    polling_interval=1,
+                )
+                result = poller.result()
+            except Exception as err:
+                logger.warning(
+                    f"Azure Document Intelligence error ({err}). Switching to fast local extractor."
+                )
+                self.client = None  # Circuit breaker
 
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Document not found: {document_path}"
-            )
-
-        if not path.is_file():
-            raise ValueError(
-                f"Document path is not a file: {document_path}"
-            )
-
-        with path.open("rb") as document:
-            poller = self.client.begin_analyze_document(
-                "prebuilt-layout",
-                body=document,
-            )
-
-        result = poller.result()
+        if result is None:
+            from app.capabilities.local_pdf_extractor import parse_pdf_layout_locally
+            result = parse_pdf_layout_locally(doc_bytes)
 
         paragraphs = result.paragraphs or []
 
         return {
-            "document_path": str(path),
+            "document_path": str(document_path),
 
             "po_number": self._extract_named_value(
                 paragraphs,
