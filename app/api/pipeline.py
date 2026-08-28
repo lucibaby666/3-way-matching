@@ -4,7 +4,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.api.runtime import MatchRun
 from app.capabilities.document_set_loader import (
@@ -14,10 +14,31 @@ from app.capabilities.document_snip import DocumentSnip
 from app.capabilities.evidence_generator import (
     EvidenceGenerator,
 )
+from app.capabilities.smart_approval import get_smart_approval_system
 from app.matching.matching_engine import MatchingEngine
+from app.models.validation_result import ValidationResult
 from app.monitoring.json_logging import log_event
 from app.monitoring.run_history import record_event
 from app.storage.document_storage import DocumentStorage
+try:
+    from database_operations import (
+        insert_audit_to_db,
+        insert_statistics_to_db,
+    )
+except ImportError:
+    import sys
+    sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+    try:
+        from database_operations import (
+            insert_audit_to_db,
+            insert_statistics_to_db,
+        )
+    except ImportError:
+        def insert_audit_to_db(entry):
+            return False
+        def insert_statistics_to_db(stats):
+            return None
+
 
 EVIDENCE_ROOT = Path("outputs/evidence")
 
@@ -58,7 +79,7 @@ def _snip_url(snip_path: str) -> str:
     return f"/evidence/{relative.as_posix()}"
 
 
-def _exception_as_dict(exception: Any) -> Dict[str, Any]:
+def _exception_as_dict(exception: Any, approval_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "type": str(exception.type),
         "item_code": exception.item_code,
@@ -80,6 +101,14 @@ def _exception_as_dict(exception: Any) -> Dict[str, Any]:
             if evidence.get("snip_path")
         ]
 
+    if approval_info:
+        data["auto_approved"] = approval_info.get("auto_approved", False)
+        data["decision"] = approval_info.get("decision")
+        data["similarity_score"] = approval_info.get("similarity_score")
+        data["precedent_id"] = approval_info.get("precedent_id")
+        data["reviewer"] = approval_info.get("reviewer")
+        data["comment"] = approval_info.get("comment")
+
     return data
 
 
@@ -88,11 +117,20 @@ async def execute_match_run(
     storage: DocumentStorage,
 ) -> None:
     """
-    Run the full 3-way matching pipeline for one uploaded
-    document set and stream progress into the run.
+    Run the full 3-way matching pipeline with Smart Approval and ChromaDB precedent checking.
     """
 
     def step(step_name: str, message: str) -> None:
+        icons = {
+            "intake": "📥 [INTAKE]",
+            "demo-discrepancy": "⚡ [DISCREPANCY]",
+            "matching": "🔍 [MATCHING]",
+            "smart-approval": "🧠 [SMART APPROVAL]",
+            "hitl": "👤 [HUMAN IN THE LOOP]",
+        }
+        icon = icons.get(step_name, f"🔹 [{step_name.upper()}]")
+        print(f"{icon} {message}", flush=True)
+
         logger.info(
             "Match run %s [%s]: %s",
             run.run_id,
@@ -131,11 +169,29 @@ async def execute_match_run(
     try:
         run.status = "running"
 
+        # Log system start to DB
+        insert_audit_to_db({
+            "audit_id": f"SYS-{datetime.now().strftime('%Y%m%d_%H%M%S')}_{run.run_id[:6]}",
+            "event_type": "SYSTEM_START",
+            "severity": "INFO",
+            "user": "system",
+            "action": f"Starting 3-Way Matching Run {run.run_id}",
+            "resource": run.run_id,
+            "resource_type": "RUN",
+            "status": "RUNNING",
+            "error": None,
+            "metadata": {
+                "run_id": run.run_id,
+                "upload_id": run.upload_id,
+                "inject_discrepancy": run.inject_discrepancy
+            }
+        })
+
         # --------------------------------------------------
-        # 1. INTAKE
+        # 1. INTAKE & EXTRACTION
         # --------------------------------------------------
 
-        step("intake", "Loading uploaded documents.")
+        step("intake", "Initiating parallel document extraction with Azure Document Intelligence...")
 
         loader = DocumentSetLoader(storage=storage)
         loaded = await asyncio.to_thread(loader.load)
@@ -148,16 +204,33 @@ async def execute_match_run(
 
         step(
             "intake",
-            f"Loaded {len(contracts)} contract(s), "
+            f"Successfully extracted {len(contracts)} contract(s), "
             f"{len(purchase_orders)} PO(s), "
             f"{len(invoices)} invoice(s).",
         )
+
+        insert_audit_to_db({
+            "audit_id": f"DOC-{datetime.now().strftime('%Y%m%d_%H%M%S')}_{run.run_id[:6]}",
+            "event_type": "DOCUMENT_INTAKE_COMPLETE",
+            "severity": "INFO",
+            "user": "system",
+            "action": "Document intake completed",
+            "resource": run.upload_id,
+            "resource_type": "UPLOAD",
+            "status": "SUCCESS",
+            "error": None,
+            "metadata": {
+                "contracts": len(contracts),
+                "purchase_orders": len(purchase_orders),
+                "invoices": len(invoices)
+            }
+        })
 
         # --------------------------------------------------
         # 2. DISCREPANCY INJECTION (DEMO ONLY)
         # --------------------------------------------------
 
-        if run.inject_discrepancy:
+        if run.inject_discrepancy and invoices:
             invoice = invoices[0]
 
             if not invoice.line_items:
@@ -168,14 +241,14 @@ async def execute_match_run(
             original_quantity = invoice.line_items[0].quantity
             original_price = invoice.line_items[0].unit_price
 
-            invoice.line_items[0].quantity = 110
-            invoice.line_items[0].unit_price = 260
+            invoice.line_items[0].quantity = round(original_quantity * 1.1, 2)
+            invoice.line_items[0].unit_price = round(original_price * 1.04, 2)
 
             step(
                 "demo-discrepancy",
                 f"Invoice {invoice.line_items[0].item_code} "
-                f"modified in memory (qty {original_quantity} -> 110, "
-                f"price {original_price} -> 260).",
+                f"modified for demo (qty {original_quantity} -> {invoice.line_items[0].quantity}, "
+                f"price {original_price} -> {invoice.line_items[0].unit_price}).",
             )
 
         # --------------------------------------------------
@@ -202,34 +275,114 @@ async def execute_match_run(
 
         step(
             "matching",
-            f"Deterministic status: {result.status}.",
+            f"Deterministic status: {result.status} with {len(result.exceptions)} exception(s).",
         )
 
+        insert_audit_to_db({
+            "audit_id": f"MATCH-{datetime.now().strftime('%Y%m%d_%H%M%S')}_{run.run_id[:6]}",
+            "event_type": "MATCHING_COMPLETE",
+            "severity": "INFO",
+            "user": "system",
+            "action": f"Matching completed with status: {result.status}",
+            "resource": run.run_id,
+            "resource_type": "MATCHING",
+            "status": result.status,
+            "error": None,
+            "metadata": {
+                "matching_status": result.status,
+                "exception_count": len(result.exceptions)
+            }
+        })
+
         # --------------------------------------------------
-        # 4. HITL ROUTING
+        # 4. SMART APPROVAL (CHROMADB PRECEDENT EVALUATION)
+        # --------------------------------------------------
+
+        smart_approval = get_smart_approval_system()
+        exception_evaluations: List[Dict[str, Any]] = []
+        auto_approved_exceptions: List[Any] = []
+        human_review_exceptions: List[Any] = []
+
+        if result.exceptions:
+            step("smart-approval", "Querying ChromaDB for historical exception precedents...")
+
+            for exception in result.exceptions:
+                exc_dict = {
+                    "type": str(exception.type),
+                    "item_code": exception.item_code or "UNKNOWN",
+                    "field": str(exception.field) or "UNKNOWN",
+                    "expected": str(exception.expected),
+                    "actual": str(exception.actual),
+                    "tolerance": str(getattr(exception, "tolerance", "NONE") or "NONE"),
+                }
+
+                eval_result = await asyncio.to_thread(
+                    smart_approval.process_exception, exc_dict
+                )
+                exception_evaluations.append(eval_result)
+
+                if eval_result.get("auto_approved"):
+                    auto_approved_exceptions.append(exception)
+                    similarity_pct = round(eval_result['similarity_score'] * 100, 1)
+                    step(
+                        "smart-approval",
+                        f"🤖 Auto-{eval_result['decision']}: {exception.type} on {exception.item_code} "
+                        f"({similarity_pct}% similarity to precedent {eval_result['precedent_id']})."
+                    )
+                else:
+                    human_review_exceptions.append(exception)
+                    step(
+                        "smart-approval",
+                        f"👤 No precedent match for {exception.type} on {exception.item_code} — Routing to Human Review."
+                    )
+
+        mark_phase("smart_approval")
+
+        # --------------------------------------------------
+        # 5. HITL ROUTING
         # --------------------------------------------------
 
         from app.api.runtime import hitl_service
 
-        hitl_case = await asyncio.to_thread(
-            hitl_service.create_case,
-            result,
-        )
-        mark_phase("hitl_routing")
+        hitl_case = None
 
-        if hitl_case is None:
+        if human_review_exceptions:
+            # Create HITL case only for unresolved exceptions
+            unresolved_validation_result = ValidationResult(
+                status="EXCEPTION",
+                exceptions=human_review_exceptions,
+            )
+            hitl_case = await asyncio.to_thread(
+                hitl_service.create_case,
+                unresolved_validation_result,
+            )
             step(
                 "hitl",
-                "No exceptions routed to human review.",
+                f"Case {hitl_case.case_id} created for {len(human_review_exceptions)} unresolved exception(s).",
+            )
+
+        elif auto_approved_exceptions and not human_review_exceptions:
+            step(
+                "hitl",
+                "All exceptions were auto-approved based on historical precedents! No human review needed.",
             )
         else:
             step(
                 "hitl",
-                f"Case {hitl_case.case_id} created for review.",
+                "No exceptions routed to human review.",
             )
 
+        mark_phase("hitl_routing")
+
+        # Determine overall effective status
+        effective_status = result.status
+        if result.exceptions and len(auto_approved_exceptions) == len(result.exceptions):
+            effective_status = "AUTO_APPROVED"
+        elif human_review_exceptions:
+            effective_status = "EXCEPTION"
+
         # --------------------------------------------------
-        # 5. BUILD RESULT PAYLOAD
+        # 6. BUILD RESULT PAYLOAD
         # --------------------------------------------------
 
         first = lambda category: (
@@ -238,8 +391,17 @@ async def execute_match_run(
             else {}
         )  # noqa: E731
 
+        formatted_exceptions = [
+            _exception_as_dict(
+                exc,
+                approval_info=exception_evaluations[i] if i < len(exception_evaluations) else None
+            )
+            for i, exc in enumerate(result.exceptions)
+        ]
+
         payload: Dict[str, Any] = {
-            "status": result.status,
+            "status": effective_status,
+            "deterministic_status": result.status,
             "documents": {
                 "contracts": {
                     "number": contracts[0].contract_number
@@ -275,10 +437,13 @@ async def execute_match_run(
                     invoices[0].line_items if invoices else []
                 ),
             },
-            "exceptions": [
-                _exception_as_dict(exception)
-                for exception in result.exceptions
-            ],
+            "exceptions": formatted_exceptions,
+            "smart_approval": {
+                "total_exceptions": len(result.exceptions),
+                "auto_approved_count": len(auto_approved_exceptions),
+                "human_review_count": len(human_review_exceptions),
+                "stats": smart_approval.get_stats(),
+            },
             "hitl_case": {
                 "case_id": hitl_case.case_id,
                 "status": hitl_case.status.value,
@@ -290,7 +455,7 @@ async def execute_match_run(
 
         step(
             "done-preparing",
-            "Pipeline finished.",
+            f"Pipeline finished with status: {effective_status}.",
         )
 
         run.result = payload
@@ -311,13 +476,65 @@ async def execute_match_run(
             error=None,
         )
 
+        # Log completion to DB
+        insert_audit_to_db({
+            "audit_id": f"SYS-{datetime.now().strftime('%Y%m%d_%H%M%S')}_{run.run_id[:6]}",
+            "event_type": "SYSTEM_COMPLETE",
+            "severity": "INFO",
+            "user": "system",
+            "action": f"Run completed with status {effective_status}",
+            "resource": run.run_id,
+            "resource_type": "RUN",
+            "status": "SUCCESS",
+            "error": None,
+            "metadata": {
+                "run_id": run.run_id,
+                "status": effective_status,
+                "auto_approved": len(auto_approved_exceptions),
+                "human_reviewed": len(human_review_exceptions),
+                "hitl_case_id": hitl_case.case_id if hitl_case else None
+            }
+        })
+
+        # Insert statistics into SQL Server table
+        try:
+            insert_statistics_to_db({
+                "total_entries": len(result.exceptions),
+                "severity_counts": {
+                    "INFO": len(auto_approved_exceptions),
+                    "WARNING": len(human_review_exceptions),
+                    "HIGH": 0,
+                    "CRITICAL": 0
+                },
+                "status_counts": {
+                    "SUCCESS": 1 if effective_status in ["PASS", "AUTO_APPROVED"] else 0,
+                    "FAILED": 1 if effective_status == "EXCEPTION" else 0
+                },
+                "matching_status": effective_status,
+                "exception_count": len(result.exceptions),
+                "hitl_case_id": hitl_case.case_id if hitl_case else None,
+                "evidence_dir": str(evidence_dir)
+            })
+        except Exception as stats_err:
+            logger.warning(f"Failed to record statistics to DB: {stats_err}")
+
+        print("\n" + "=" * 70, flush=True)
+        print(f"✅ MATCH RUN COMPLETED: {run.run_id}", flush=True)
+        print(f"   Status: {effective_status}", flush=True)
+        print(f"   Contracts: {len(contracts)} | POs: {len(purchase_orders)} | Invoices: {len(invoices)}", flush=True)
+        print(f"   Total Exceptions: {len(result.exceptions)}", flush=True)
+        print(f"   Auto-Approved via ChromaDB: {len(auto_approved_exceptions)}", flush=True)
+        print(f"   Pending Human Review: {len(human_review_exceptions)}", flush=True)
+        print("=" * 70 + "\n", flush=True)
+
         log_event(
             logger,
             "run_completed",
             run_id=run.run_id,
             upload_id=run.upload_id,
-            status=result.status,
+            status=effective_status,
             exception_count=len(result.exceptions),
+            auto_approved_count=len(auto_approved_exceptions),
             hitl_created=hitl_case is not None,
             duration_ms=durations_ms.get("total"),
             inject_discrepancy=run.inject_discrepancy,
@@ -340,6 +557,18 @@ async def execute_match_run(
             completed_phases=list(durations_ms.keys()),
             inject_discrepancy=run.inject_discrepancy,
         )
+        insert_audit_to_db({
+            "audit_id": f"ERR-{datetime.now().strftime('%Y%m%d_%H%M%S')}_{run.run_id[:6]}",
+            "event_type": "SYSTEM_ERROR",
+            "severity": "CRITICAL",
+            "user": "system",
+            "action": f"Run failed: {error}",
+            "resource": run.run_id,
+            "resource_type": "RUN",
+            "status": "FAILED",
+            "error": str(error),
+            "metadata": {"traceback": str(error)}
+        })
         run.emit(
             {
                 "type": "error",
@@ -357,6 +586,7 @@ async def execute_match_run(
             hitl_case_id=None,
             error=str(error) or error.__class__.__name__,
         )
+
 
 
 def _record_run(

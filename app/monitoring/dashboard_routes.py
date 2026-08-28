@@ -66,11 +66,13 @@ async def dashboard_summary(
     Pipeline metrics aggregated from run history.
     Admin-only.
     """
+    from app.capabilities.smart_approval import get_smart_approval_system
 
     summary = await asyncio.to_thread(
         summarize_runs, float(hours)
     )
     summary["system"] = _system_info()
+    summary["smart_approval"] = get_smart_approval_system().get_stats()
 
     return summary
 

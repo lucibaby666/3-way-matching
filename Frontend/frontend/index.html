@@ -3,148 +3,209 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>3-Way Matching</title>
+<title>3-Way Matching &amp; Smart Approval</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#f4f6f9;--card:#fff;--primary:#2563eb;--primary-hover:#1d4ed8;--danger:#ef4444;--success:#16a34a;--warn:#f59e0b;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--radius:10px}
-body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-header{background:linear-gradient(135deg,#1e3a5f,#2563eb);color:#fff;padding:24px 32px;display:flex;align-items:center;gap:16px}
-header h1{font-size:1.5rem;font-weight:600}
-header span{font-size:.85rem;opacity:.8}
-.container{max-width:1200px;margin:0 auto;padding:24px}
-.card{background:var(--card);border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px;margin-bottom:20px}
-.card h2{font-size:1.1rem;margin-bottom:16px;display:flex;align-items:center;gap:8px}
-.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600;text-transform:uppercase}
-.badge-pass{background:#dcfce7;color:#166534}
-.badge-exception{background:#fee2e2;color:#991b1b}
-.badge-pending{background:#fef3c7;color:#92400e}
-.badge-reviewed{background:#dbeafe;color:#1e40af}
-btn,.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border:none;border-radius:var(--radius);font-size:.9rem;font-weight:500;cursor:pointer;transition:.2s}
-.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}
-.btn-success{background:var(--success);color:#fff}.btn-success:hover{background:#15803d}
-.btn-danger{background:var(--danger);color:#fff}.btn-danger:hover{background:#dc2626}
-.btn-warn{background:var(--warn);color:#fff}.btn-warn:hover{background:#d97706}
-.btn:disabled{opacity:.5;cursor:not-allowed}
+:root{
+  --bg:#f4f6f9;
+  --card:#fff;
+  --primary:#2563eb;
+  --primary-hover:#1d4ed8;
+  --primary-light:#eff6ff;
+  --danger:#ef4444;
+  --danger-light:#fef2f2;
+  --success:#16a34a;
+  --success-light:#f0fdf4;
+  --warn:#f59e0b;
+  --warn-light:#fefce8;
+  --purple:#7c3aed;
+  --purple-light:#f5f3ff;
+  --text:#1e293b;
+  --muted:#64748b;
+  --border:#e2e8f0;
+  --radius:12px;
+}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+header{background:linear-gradient(135deg,#0f172a,#1e3a5f,#2563eb);color:#fff;padding:20px 32px;display:flex;align-items:center;gap:16px;box-shadow:0 4px 12px rgba(0,0,0,0.1)}
+header h1{font-size:1.4rem;font-weight:700;letter-spacing:-0.5px}
+header span{font-size:.85rem;opacity:.85}
+.container{max-width:1240px;margin:0 auto;padding:24px 20px}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:0 2px 8px rgba(0,0,0,.05);padding:24px;margin-bottom:20px;border:1px solid rgba(226,232,240,0.8)}
+.card h2{font-size:1.15rem;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+
+/* System Stats Bar */
+.stats-bar{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:20px}
+.stat-pill{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03)}
+.stat-icon{width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.2rem}
+.stat-info .stat-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;letter-spacing:0.5px}
+.stat-info .stat-value{font-size:1.15rem;font-weight:700;color:var(--text);margin-top:2px}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+.badge-pass{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}
+.badge-auto{background:#f3e8ff;color:#6b21a8;border:1px solid #e9d5ff}
+.badge-exception{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+.badge-pending{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+.badge-reviewed{background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s ease}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:0 2px 4px rgba(37,99,235,0.2)}.btn-primary:hover{background:var(--primary-hover);transform:translateY(-1px)}
+.btn-success{background:var(--success);color:#fff}.btn-success:hover{background:#15803d;transform:translateY(-1px)}
+.btn-danger{background:var(--danger);color:#fff}.btn-danger:hover{background:#dc2626;transform:translateY(-1px)}
+.btn-warn{background:var(--warn);color:#fff}.btn-warn:hover{background:#d97706;transform:translateY(-1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+/* Tables */
 table{width:100%;border-collapse:collapse;font-size:.85rem}
-th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid var(--border);color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
-td{padding:10px 12px;border-bottom:1px solid var(--border)}
+th{text-align:left;padding:12px 14px;background:#f8fafc;border-bottom:2px solid var(--border);color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
+td{padding:12px 14px;border-bottom:1px solid var(--border)}
 tr:last-child td{border-bottom:none}
-.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.controls label{font-size:.85rem;color:var(--muted);display:flex;align-items:center;gap:6px}
-.controls input[type=checkbox]{accent-color:var(--primary);width:16px;height:16px}
-.status-bar{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
-.status-bar .item{font-size:.85rem;color:var(--muted)}
-.status-bar .item strong{color:var(--text)}
-.exc-card{background:#fef2f2;border-left:4px solid var(--danger);border-radius:6px;padding:14px 16px;margin-bottom:10px}
-.exc-card .exc-title{font-weight:600;color:#991b1b;margin-bottom:6px}
-.exc-card .exc-detail{font-size:.85rem;color:var(--text)}
-.evidence-img{max-width:100%;border-radius:6px;border:1px solid var(--border);margin-top:8px}
-.hitl-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+
+.controls{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.file-box{background:#f8fafc;border:1.5px dashed #cbd5e1;border-radius:8px;padding:12px 16px;flex:1;min-width:220px;transition:.2s}
+.file-box:hover{border-color:var(--primary);background:#f1f5f9}
+.file-box span{display:block;font-size:.75rem;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.file-box input[type=file]{font-size:.82rem;width:100%;color:var(--text)}
+
+.exc-card{border-radius:10px;padding:16px 20px;margin-bottom:14px;border:1px solid var(--border);transition:.2s}
+.exc-card.auto-approved{background:var(--purple-light);border-left:5px solid var(--purple);border-color:#e9d5ff}
+.exc-card.needs-review{background:var(--danger-light);border-left:5px solid var(--danger);border-color:#fecaca}
+
+.exc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px}
+.exc-title{font-weight:700;font-size:.95rem}
+.exc-detail{font-size:.88rem;line-height:1.6;color:var(--text)}
+.precedent-box{background:rgba(255,255,255,0.7);border-radius:8px;padding:10px 14px;margin-top:10px;font-size:.82rem;border:1px solid rgba(124,58,237,0.2)}
+
+.evidence-img{max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);margin-top:10px;box-shadow:0 2px 6px rgba(0,0,0,0.06)}
+.hitl-actions{display:flex;gap:12px;margin-top:16px;align-items:center;flex-wrap:wrap}
+
 #loading{display:none;text-align:center;padding:40px;color:var(--muted);font-size:1rem}
 #loading.active{display:block}
-.spinner{display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle}
+.spinner{display:inline-block;width:26px;height:26px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;margin-right:10px;vertical-align:middle}
 @keyframes spin{to{transform:rotate(360deg)}}
 .hidden{display:none}
-.doc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
-.doc-item{background:#f8fafc;border-radius:8px;padding:14px;border:1px solid var(--border)}
-.doc-item .label{font-size:.75rem;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:4px}
-.doc-item .value{font-size:.95rem;font-weight:500}
-.toast{position:fixed;bottom:24px;right:24px;background:#1e293b;color:#fff;padding:12px 20px;border-radius:8px;font-size:.9rem;z-index:999;opacity:0;transition:opacity .3s}
-.toast.show{opacity:1}
+
+.doc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.doc-item{background:#f8fafc;border-radius:8px;padding:16px;border:1px solid var(--border)}
+.doc-item .label{font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px}
+.doc-item .value{font-size:1.05rem;font-weight:600}
+
+.toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:14px 22px;border-radius:10px;font-size:.9rem;font-weight:500;z-index:999;opacity:0;transform:translateY(10px);transition:all .3s ease;box-shadow:0 6px 20px rgba(0,0,0,0.2)}
+.toast.show{opacity:1;transform:translateY(0)}
 </style>
 </head>
 <body>
 
 <header>
-  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+  <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
   <div>
-    <h1>3-Way Matching</h1>
-    <span>Contract &bull; Purchase Order &bull; Invoice</span>
+    <h1>3-Way Matching with Smart Approval</h1>
+    <span>Contract &bull; Purchase Order &bull; Invoice &bull; ChromaDB Vector Intelligence</span>
   </div>
-  <a id="dashLink" href="/login.html" class="btn btn-light" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff;text-decoration:none">
+  <a id="dashLink" href="/login.html" class="btn" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff;text-decoration:none">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 13l3-3 3 2 5-5"/></svg>
     Dashboard
   </a>
-  <span id="userBadge" style="font-size:.85rem;opacity:.9"></span>
-  <button class="btn btn-light" style="background:rgba(255,255,255,.15)" onclick="logout()">Logout</button>
+  <span id="userBadge" style="font-size:.85rem;opacity:.95;font-weight:500"></span>
+  <button class="btn" style="background:rgba(255,255,255,.15);color:#fff" onclick="logout()">Logout</button>
 </header>
-<script>
-let currentUser = null;
-
-(async () => {
-  try {
-    const res = await fetch('/api/auth/me');
-    if (!res.ok) throw new Error('unauthenticated');
-    currentUser = await res.json();
-    document.getElementById('dashLink').href =
-      currentUser.role === 'ADMIN' ? '/admin-dashboard.html' : '/audit-dashboard.html';
-    document.getElementById('userBadge').textContent =
-      currentUser.username + ' (' + currentUser.role.toLowerCase() + ')';
-  } catch {
-    location.href = '/login.html';
-  }
-})();
-
-async function logout() {
-  await fetch('/api/auth/logout', { method: 'POST' });
-  location.href = '/login.html';
-}
-</script>
 
 <div class="container">
 
+  <!-- System Health & Vector Store Stats Bar -->
+  <div class="stats-bar">
+    <div class="stat-pill">
+      <div class="stat-icon" style="background:#f3e8ff;color:#7c3aed">🧠</div>
+      <div class="stat-info">
+        <div class="stat-label">ChromaDB Vectors</div>
+        <div class="stat-value" id="statVectors">Loading...</div>
+      </div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-icon" style="background:#dbeafe;color:#2563eb">🗄️</div>
+      <div class="stat-info">
+        <div class="stat-label">SQL Server Audit DB</div>
+        <div class="stat-value" id="statDb">Checking...</div>
+      </div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-icon" style="background:#dcfce7;color:#16a34a">⚡</div>
+      <div class="stat-info">
+        <div class="stat-label">Smart Auto-Approval</div>
+        <div class="stat-value" style="color:#16a34a">Active (95% Sim)</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Run Controls -->
   <div class="card">
-    <h2>Upload & Run</h2>
-    <div class="controls" style="align-items:flex-start">
-      <label style="flex-direction:column;align-items:flex-start">
-        <span>Contract PDFs</span>
+    <h2>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload Documents &amp; Run Smart Matching
+    </h2>
+    <div class="controls">
+      <div class="file-box">
+        <span>📄 Contract PDFs</span>
         <input type="file" id="contractFile" accept=".pdf" multiple>
-      </label>
-      <label style="flex-direction:column;align-items:flex-start">
-        <span>Purchase Order PDFs</span>
+      </div>
+      <div class="file-box">
+        <span>📦 Purchase Order PDFs</span>
         <input type="file" id="poFile" accept=".pdf" multiple>
-      </label>
-      <label style="flex-direction:column;align-items:flex-start">
-        <span>Invoice PDFs</span>
+      </div>
+      <div class="file-box">
+        <span>🧾 Invoice PDFs</span>
         <input type="file" id="invoiceFile" accept=".pdf" multiple>
-      </label>
+      </div>
     </div>
-    <div class="controls" style="margin-top:12px">
-      <label>
-        <input type="checkbox" id="chkDiscrepancy" checked>
-        Inject demo discrepancy
+    <div style="font-size:.82rem;color:var(--muted);margin-top:10px">
+      💡 <em>Tip: You can leave the file inputs empty &mdash; clicking "Run 3-Way Matching" will automatically load the built-in demo Contract, PO, and Invoice!</em>
+    </div>
+    <div class="controls" style="margin-top:16px;justify-content:space-between">
+      <label style="display:flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer">
+        <input type="checkbox" id="chkDiscrepancy" checked style="accent-color:var(--primary);width:17px;height:17px">
+        <span>Inject controlled demo discrepancy (10% Qty, 4% Price)</span>
       </label>
       <button class="btn btn-primary" id="btnRun" onclick="runMatching()">
-        Upload & Run
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Run 3-Way Matching
       </button>
     </div>
   </div>
 
-  <div id="loading"><span class="spinner"></span>Running extraction &amp; matching pipeline &hellip;</div>
+  <div id="loading"><span class="spinner"></span>Processing document intake, extraction, ChromaDB precedent search &amp; 3-way matching &hellip;</div>
 
+  <!-- Pipeline Steps Stream -->
   <div id="stepsCard" class="card hidden">
-    <h2>Pipeline Steps</h2>
-    <div id="stepsList" style="font-size:.95rem;color:var(--muted);line-height:1.7"></div>
+    <h2>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Live Pipeline Progress
+    </h2>
+    <div id="stepsList" style="font-size:.9rem;color:var(--muted);line-height:1.8"></div>
   </div>
 
   <!-- Results section -->
   <div id="results" class="hidden">
 
-    <!-- Documents -->
+    <!-- Documents Grid -->
     <div class="card">
-      <h2>Documents</h2>
+      <h2>Extracted Document References</h2>
       <div class="doc-grid" id="docGrid"></div>
     </div>
 
-    <!-- Line Items -->
+    <!-- Line Items Table -->
     <div class="card">
-      <h2>Line Items Comparison</h2>
+      <h2>Line Items Comparison Matrix</h2>
       <div style="overflow-x:auto">
         <table id="lineTable">
           <thead>
             <tr>
-              <th>Source</th><th>Item Code</th><th>Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th>
+              <th>Source Document</th>
+              <th>Item Code</th>
+              <th>Description</th>
+              <th>Quantity</th>
+              <th>Unit Price</th>
+              <th>Total Amount</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -152,23 +213,49 @@ async function logout() {
       </div>
     </div>
 
-    <!-- Matching Result -->
+    <!-- Smart Approval & Exceptions Result -->
     <div class="card">
-      <h2>Matching Result <span id="statusBadge"></span></h2>
+      <h2>
+        Matching Outcome &amp; Smart Approvals 
+        <span id="statusBadge" style="margin-left:auto"></span>
+      </h2>
+      <div id="smartSummary" style="margin-bottom:14px"></div>
       <div id="exceptionsArea"></div>
-      <p id="noExceptions" class="hidden" style="color:var(--success);font-weight:500">All documents match — no exceptions found.</p>
+      <p id="noExceptions" class="hidden" style="color:var(--success);font-weight:600;font-size:1rem">
+        ✅ All documents matched perfectly &mdash; zero discrepancies detected!
+      </p>
     </div>
 
-    <!-- HITL Review -->
-    <div class="card hidden" id="hitlCard">
-      <h2>Human-in-the-Loop Review</h2>
-      <div class="status-bar" id="hitlStatus"></div>
-      <div class="hitl-actions" id="hitlActions">
-        <button class="btn btn-success" onclick="submitDecision('APPROVE')">Approve</button>
-        <button class="btn btn-danger" onclick="submitDecision('REJECT')">Reject</button>
-        <button class="btn btn-warn" onclick="submitDecision('OVERRIDE')">Override</button>
+    <!-- HITL Human Review & Learning Card -->
+    <div class="card hidden" id="hitlCard" style="border-top:4px solid var(--warn)">
+      <h2>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Human-in-the-Loop Review &amp; Precedent Learning
+      </h2>
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:14px">
+        Your decision will be recorded in SQL Server audit logs and <strong>vectorized into ChromaDB</strong> so identical or highly similar exceptions will be auto-approved in future runs.
+      </p>
+      <div class="status-bar" id="hitlStatus" style="display:flex;gap:20px;flex-wrap:wrap;background:#f8fafc;padding:12px 16px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px"></div>
+      
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Reviewer Comment / Business Justification</label>
+        <input type="text" id="decisionComment" placeholder="e.g., Approved: Discrepancy is within contractual discount agreement" style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--border);font-size:.9rem">
       </div>
-      <div id="hitlResult" class="hidden" style="margin-top:14px"></div>
+
+      <div class="hitl-actions" id="hitlActions">
+        <button class="btn btn-success" onclick="submitDecision('APPROVE')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          Approve &amp; Train AI Precedent
+        </button>
+        <button class="btn btn-danger" onclick="submitDecision('REJECT')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          Reject &amp; Train AI Precedent
+        </button>
+        <button class="btn btn-warn" onclick="submitDecision('OVERRIDE')">
+          Override Exception
+        </button>
+      </div>
+      <div id="hitlResult" class="hidden" style="margin-top:14px;padding:14px;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0"></div>
     </div>
   </div>
 </div>
@@ -179,9 +266,51 @@ async function logout() {
 const API = '';
 let lastResult = null;
 let eventSource = null;
+let currentUser = null;
+
+// Authentication check & initial load
+(async () => {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error('unauthenticated');
+    currentUser = await res.json();
+    document.getElementById('dashLink').href =
+      currentUser.role === 'ADMIN' ? '/admin-dashboard.html' : '/audit-dashboard.html';
+    document.getElementById('userBadge').textContent =
+      currentUser.username + ' (' + currentUser.role.toLowerCase() + ')';
+    
+    // Load initial system stats
+    loadSystemStats();
+  } catch {
+    location.href = '/login.html';
+  }
+})();
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.href = '/login.html';
+}
+
+async function loadSystemStats() {
+  try {
+    const res = await fetch('/api/system/stats');
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById('statVectors').textContent = 
+        `${data.smart_approval?.chromadb_vectors || 0} vectors`;
+      
+      const dbConnected = data.database?.connected;
+      const dbEl = document.getElementById('statDb');
+      dbEl.textContent = dbConnected ? `Online (${data.database?.audit_logs_count || 0} logs)` : 'Offline / Local';
+      dbEl.style.color = dbConnected ? '#16a34a' : '#f59e0b';
+    }
+  } catch (e) {
+    console.warn('Could not load system stats:', e);
+  }
+}
 
 function escapeHtml(unsafe) {
-  return String(unsafe)
+  return String(unsafe || '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -191,14 +320,19 @@ function escapeHtml(unsafe) {
 
 function appendStep(step, message) {
   const stepsList = document.getElementById('stepsList');
-  stepsList.innerHTML += `<div><strong>${escapeHtml(step)}:</strong> ${escapeHtml(message)}</div>`;
+  let icon = '🔹';
+  if (step === 'smart-approval') icon = '🧠';
+  if (step === 'hitl') icon = '👤';
+  if (step === 'matching') icon = '🔍';
+  if (step === 'intake') icon = '📥';
+  stepsList.innerHTML += `<div>${icon} <strong>${escapeHtml(step)}:</strong> ${escapeHtml(message)}</div>`;
 }
 
 function toast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
+  setTimeout(() => t.classList.remove('show'), 3500);
 }
 
 async function runMatching() {
@@ -222,48 +356,50 @@ async function runMatching() {
     const contractFiles = [...(document.getElementById('contractFile').files || [])];
     const poFiles = [...(document.getElementById('poFile').files || [])];
     const invoiceFiles = [...(document.getElementById('invoiceFile').files || [])];
+    const inject = document.getElementById('chkDiscrepancy').checked;
 
-    if (!contractFiles.length || !poFiles.length || !invoiceFiles.length) {
-      throw new Error('Please select at least one PDF for Contract, PO, and Invoice.');
-    }
+    let match;
 
-    const form = new FormData();
-    for (const file of contractFiles) form.append('contract', file);
-    for (const file of poFiles) form.append('purchase_order', file);
-    for (const file of invoiceFiles) form.append('invoice', file);
+    if (contractFiles.length && poFiles.length && invoiceFiles.length) {
+      // Upload custom files
+      const form = new FormData();
+      for (const file of contractFiles) form.append('contract', file);
+      for (const file of poFiles) form.append('purchase_order', file);
+      for (const file of invoiceFiles) form.append('invoice', file);
 
-    let uploadRes;
-    try {
-      uploadRes = await fetch(`${API}/api/uploads`, {
+      const uploadRes = await fetch(`${API}/api/uploads`, {
         method: 'POST',
         body: form,
       });
-    } catch (fetchErr) {
-      throw new Error('Failed to fetch: ' + fetchErr.message);
-    }
-    if (!uploadRes.ok) {
-      const err = await uploadRes.json().catch(() => ({}));
-      throw new Error(err.detail || 'Upload failed');
-    }
-    const upload = await uploadRes.json();
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({}));
+        throw new Error(err.detail || 'Upload failed');
+      }
+      const upload = await uploadRes.json();
 
-    const inject = document.getElementById('chkDiscrepancy').checked;
-
-    let matchRes;
-    try {
-      matchRes = await fetch(`${API}/api/matches`, {
+      const matchRes = await fetch(`${API}/api/matches`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({upload_id: upload.id, inject_discrepancy: inject}),
       });
-    } catch (fetchErr) {
-      throw new Error('Failed to fetch: ' + fetchErr.message);
+      if (!matchRes.ok) {
+        const err = await matchRes.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to start matching');
+      }
+      match = await matchRes.json();
+    } else {
+      // Use 1-Click built-in sample demo documents
+      const matchRes = await fetch(`${API}/api/matches/demo`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({inject_discrepancy: inject}),
+      });
+      if (!matchRes.ok) {
+        const err = await matchRes.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to start demo matching');
+      }
+      match = await matchRes.json();
     }
-    if (!matchRes.ok) {
-      const err = await matchRes.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to start matching');
-    }
-    const match = await matchRes.json();
 
     await new Promise((resolve, reject) => {
       const url = `${API}${match.events_url}`;
@@ -286,6 +422,7 @@ async function runMatching() {
           lastResult = msg.payload;
           renderResult(lastResult);
           results.classList.remove('hidden');
+          loadSystemStats();
           resolve();
           return;
         }
@@ -303,7 +440,7 @@ async function runMatching() {
         finished = true;
         try { eventSource.close(); } catch (e) {}
         eventSource = null;
-        reject(new Error('Connection error while streaming progress. Try again.'));
+        reject(new Error('Connection interrupted while streaming progress.'));
       };
     });
   } catch (e) {
@@ -311,38 +448,45 @@ async function runMatching() {
   } finally {
     btn.disabled = false;
     loading.classList.remove('active');
-    // Keep steps visible so the user can see where it failed.
   }
 }
 
 function renderResult(data) {
-  // Documents
+  // Documents Grid
   const grid = document.getElementById('docGrid');
   grid.innerHTML = '';
-  for (const [key, doc] of Object.entries(data.documents)) {
+  for (const [key, doc] of Object.entries(data.documents || {})) {
     const label = key.replace('_', ' ');
     grid.innerHTML += `<div class="doc-item">
       <div class="label">${label}</div>
       <div class="value">${doc.number || 'N/A'}</div>
-      <div style="font-size:.8rem;color:var(--muted);margin-top:4px">${doc.filename}</div>
+      <div style="font-size:.8rem;color:var(--muted);margin-top:4px">${doc.filename || ''}</div>
     </div>`;
   }
 
-  // Line items table
+  // Line items comparison table
   const tbody = document.querySelector('#lineTable tbody');
   tbody.innerHTML = '';
-  for (const [source, items] of Object.entries(data.line_items)) {
+  for (const [source, items] of Object.entries(data.line_items || {})) {
     const label = source.replace('_', ' ');
     for (const li of items) {
-      const isException = data.exceptions.some(e => e.item_code === li.item_code);
-      const cls = isException ? 'style="background:#fef2f2"' : '';
-      tbody.innerHTML += `<tr ${cls}>
-        <td style="text-transform:capitalize;font-weight:500">${label}</td>
-        <td>${li.item_code || ''}</td>
+      const isException = (data.exceptions || []).some(e => e.item_code === li.item_code);
+      const isAutoApproved = (data.exceptions || []).some(e => e.item_code === li.item_code && e.auto_approved);
+      
+      let rowStyle = '';
+      if (isAutoApproved) {
+        rowStyle = 'style="background:#fdf4ff"';
+      } else if (isException) {
+        rowStyle = 'style="background:#fef2f2"';
+      }
+      
+      tbody.innerHTML += `<tr ${rowStyle}>
+        <td style="text-transform:capitalize;font-weight:600">${label}</td>
+        <td><strong>${li.item_code || ''}</strong></td>
         <td>${li.description || ''}</td>
         <td>${li.quantity ?? ''}</td>
-        <td>${li.unit_price ?? ''}</td>
-        <td>${li.amount ?? ''}</td>
+        <td>${li.unit_price ? '$' + Number(li.unit_price).toFixed(2) : ''}</td>
+        <td>${li.amount ? '$' + Number(li.amount).toFixed(2) : ''}</td>
       </tr>`;
     }
   }
@@ -351,17 +495,38 @@ function renderResult(data) {
   const badge = document.getElementById('statusBadge');
   if (data.status === 'PASS') {
     badge.className = 'badge badge-pass';
-    badge.textContent = 'PASS';
+    badge.textContent = '✅ PASS';
+  } else if (data.status === 'AUTO_APPROVED') {
+    badge.className = 'badge badge-auto';
+    badge.textContent = '🤖 AUTO-APPROVED VIA PRECEDENT';
   } else {
     badge.className = 'badge badge-exception';
-    badge.textContent = 'EXCEPTION';
+    badge.textContent = '⚠️ EXCEPTION (Human Review Required)';
   }
 
-  // Exceptions
+  // Smart approval stats summary
+  const summaryEl = document.getElementById('smartSummary');
+  if (data.smart_approval && (data.exceptions || []).length > 0) {
+    const autoCount = data.smart_approval.auto_approved_count || 0;
+    const humanCount = data.smart_approval.human_review_count || 0;
+    summaryEl.innerHTML = `
+      <div style="background:#f8fafc;padding:12px 16px;border-radius:8px;border:1px solid var(--border);display:flex;gap:18px;font-size:.85rem">
+        <div><strong>Total Exceptions:</strong> ${data.exceptions.length}</div>
+        <div style="color:var(--purple)"><strong>🤖 Auto-Approved:</strong> ${autoCount}</div>
+        <div style="color:var(--danger)"><strong>👤 Pending Review:</strong> ${humanCount}</div>
+        <div style="color:var(--muted);margin-left:auto">Vector Store: <strong>${data.smart_approval.stats?.chromadb_vectors || 0}</strong> precedents</div>
+      </div>
+    `;
+  } else {
+    summaryEl.innerHTML = '';
+  }
+
+  // Exceptions Cards
   const area = document.getElementById('exceptionsArea');
   const noExc = document.getElementById('noExceptions');
   area.innerHTML = '';
-  if (!data.exceptions.length) {
+  
+  if (!data.exceptions || !data.exceptions.length) {
     noExc.classList.remove('hidden');
   } else {
     noExc.classList.add('hidden');
@@ -370,21 +535,44 @@ function renderResult(data) {
       if (exc.evidence) {
         for (const ev of exc.evidence) {
           if (ev.snip_url) {
-            evidenceHtml += `<img src="${ev.snip_url}" class="evidence-img" alt="Evidence">`;
+            evidenceHtml += `<img src="${ev.snip_url}" class="evidence-img" alt="Evidence Snip">`;
           }
         }
       }
-      area.innerHTML += `<div class="exc-card">
-        <div class="exc-title">${exc.type}</div>
-        <div class="exc-detail">
-          <strong>Item:</strong> ${exc.item_code || 'N/A'} &nbsp;
-          <strong>Field:</strong> ${exc.field || 'N/A'}<br>
-          <strong>Expected:</strong> ${exc.expected} &nbsp;
-          <strong>Actual:</strong> ${exc.actual}
-          ${exc.tolerance ? `&nbsp; <strong>Tolerance:</strong> ${exc.tolerance}` : ''}
+
+      let precedentHtml = '';
+      let cardClass = 'exc-card needs-review';
+      let badgeHtml = `<span class="badge badge-exception">👤 Needs Review</span>`;
+
+      if (exc.auto_approved) {
+        cardClass = 'exc-card auto-approved';
+        const scorePct = Math.round((exc.similarity_score || 1) * 100);
+        badgeHtml = `<span class="badge badge-auto">🤖 Auto-Approved (${scorePct}% Match)</span>`;
+        precedentHtml = `
+          <div class="precedent-box">
+            <strong>Matched Precedent:</strong> ${exc.precedent_id || 'N/A'}<br>
+            <strong>Original Reviewer:</strong> ${exc.reviewer || 'system'} &bull;
+            <strong>Historical Note:</strong> "${escapeHtml(exc.comment || 'Approved by reviewer')}"
+          </div>
+        `;
+      }
+
+      area.innerHTML += `
+        <div class="${cardClass}">
+          <div class="exc-header">
+            <span class="exc-title">${escapeHtml(exc.type)} &mdash; Item ${escapeHtml(exc.item_code || 'N/A')}</span>
+            ${badgeHtml}
+          </div>
+          <div class="exc-detail">
+            <strong>Field:</strong> ${escapeHtml(exc.field || 'N/A')} &nbsp;|&nbsp;
+            <strong>Expected:</strong> ${escapeHtml(exc.expected)} &nbsp;|&nbsp;
+            <strong>Actual:</strong> ${escapeHtml(exc.actual)}
+            ${exc.tolerance ? ` &nbsp;|&nbsp; <strong>Tolerance:</strong> ${escapeHtml(exc.tolerance)}` : ''}
+          </div>
+          ${precedentHtml}
+          ${evidenceHtml}
         </div>
-        ${evidenceHtml}
-      </div>`;
+      `;
     }
   }
 
@@ -398,9 +586,9 @@ function renderResult(data) {
     hitlCard.classList.remove('hidden');
     hitlActions.classList.remove('hidden');
     document.getElementById('hitlStatus').innerHTML = `
-      <div class="item"><strong>Case ID:</strong> ${data.hitl_case.case_id}</div>
-      <div class="item"><strong>Status:</strong> <span class="badge badge-pending">${data.hitl_case.status}</span></div>
-      <div class="item"><strong>Evidence:</strong> ${data.hitl_case.evidence_count} image(s)</div>
+      <div><strong>Case ID:</strong> <span style="font-family:monospace">${data.hitl_case.case_id}</span></div>
+      <div><strong>Status:</strong> <span class="badge badge-pending">${data.hitl_case.status}</span></div>
+      <div><strong>Evidence Snips:</strong> ${data.hitl_case.evidence_count} attached</div>
     `;
   } else {
     hitlCard.classList.add('hidden');
@@ -410,28 +598,85 @@ function renderResult(data) {
 async function submitDecision(decision) {
   if (!lastResult?.hitl_case) return;
   const caseId = lastResult.hitl_case.case_id;
+  const commentInput = document.getElementById('decisionComment');
+  const comment = commentInput.value.trim() || `${decision} decision applied via Web UI`;
 
   try {
     const res = await fetch(`${API}/api/cases/${caseId}/decisions`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({decision, comment: `${decision} via web UI`}),
+      body: JSON.stringify({
+        decision: decision,
+        reviewer: currentUser?.username || 'reviewer-001',
+        comment: comment
+      }),
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || 'Decision failed');
+      throw new Error(err.detail || 'Decision submission failed');
     }
     const result = await res.json();
 
     document.getElementById('hitlActions').classList.add('hidden');
     const hitlResult = document.getElementById('hitlResult');
     hitlResult.classList.remove('hidden');
-    const badgeCls = result.status === 'REVIEWED' ? 'badge-reviewed' : 'badge-pending';
+    
+    // Dynamically update main status badge
+    const badge = document.getElementById('statusBadge');
+    if (decision === 'APPROVE') {
+      badge.className = 'badge badge-pass';
+      badge.textContent = '✅ REVIEWED & APPROVED (Precedent Stored in ChromaDB)';
+    } else {
+      badge.className = 'badge badge-exception';
+      badge.textContent = '❌ REVIEWED & REJECTED';
+    }
+
+    // Update HITL Case Status display
+    const hitlStatusEl = document.getElementById('hitlStatus');
+    if (hitlStatusEl) {
+      hitlStatusEl.innerHTML = `
+        <div><strong>Case ID:</strong> <span style="font-family:monospace">${caseId}</span></div>
+        <div><strong>Status:</strong> <span class="badge ${decision === 'APPROVE' ? 'badge-pass' : 'badge-exception'}">REVIEWED (${decision})</span></div>
+        <div><strong>Reviewer:</strong> ${result.reviewer}</div>
+      `;
+    }
+
+    // Update table rows to approved
+    const rows = document.querySelectorAll('#lineTable tbody tr');
+    rows.forEach(r => {
+      if (decision === 'APPROVE') {
+        r.style.background = '#f0fdf4';
+      }
+    });
+
+    // Update exception cards on screen
+    const cards = document.querySelectorAll('.exc-card.needs-review');
+    cards.forEach(c => {
+      c.className = decision === 'APPROVE' ? 'exc-card auto-approved' : 'exc-card';
+      const b = c.querySelector('.badge');
+      if (b) {
+        b.className = decision === 'APPROVE' ? 'badge badge-pass' : 'badge badge-exception';
+        b.textContent = decision === 'APPROVE' ? '✅ Approved & Stored in ChromaDB' : '❌ Rejected';
+      }
+    });
+
     hitlResult.innerHTML = `
-      <span class="badge ${badgeCls}">${result.status}</span>
-      <span style="margin-left:8px;font-size:.9rem">Decision: <strong>${result.decision}</strong> by ${result.reviewer}</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span class="badge badge-reviewed">REVIEW COMPLETED</span>
+        <span style="font-size:.95rem;font-weight:600">Decision: <strong>${result.decision}</strong> by ${result.reviewer}</span>
+      </div>
+      <div style="font-size:.85rem;color:var(--muted);line-height:1.5">
+        🧠 <strong>AI Precedent Saved!</strong> This decision was vectorized and stored in ChromaDB (total vectors: ${result.chromadb_vectors}). Future matching runs with similar discrepancy signatures will automatically resolve without requiring human review.
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn btn-primary" style="padding:8px 16px;font-size:.85rem" onclick="runMatching()">
+          🔄 Run Matching Again (Verify Auto-Approval)
+        </button>
+      </div>
     `;
-    toast('Decision submitted successfully');
+    
+    toast(`✅ Decision '${decision}' recorded & ChromaDB precedent learned!`);
+    loadSystemStats();
   } catch (e) {
     toast('Error: ' + e.message);
   }
@@ -439,3 +684,4 @@ async function submitDecision(decision) {
 </script>
 </body>
 </html>
+

@@ -1,6 +1,6 @@
 agent-framework
 fastapi
-uvicorn[standard]
+uvicorn
 python-dotenv
 azure-identity
 azure-storage-blob
@@ -10,3 +10,12 @@ azure-ai-documentintelligence
 pydantic
 pymupdf
 pillow
+pyodbc
+chromadb
+sentence-transformers
+torch
+transformers
+scikit-learn
+pandas
+numpy
+tqdm

@@ -1,13 +1,11 @@
+import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
-
-from app.env import get_env
-from app.storage.document_io import open_document_stream
-from app.storage.document_storage import DocumentStorage
 
 
 load_dotenv()
@@ -23,51 +21,72 @@ class ContractExtractor:
     This is NOT the canonical Contract domain model.
     """
 
-    def __init__(
-        self,
-        storage: DocumentStorage | None = None,
-    ):
+    def __init__(self, storage: Any = None):
         self.storage = storage
+        use_local = os.getenv("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
+        endpoint = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
+        api_key = os.getenv("DOCUMENT_INTELLIGENCE_API_KEY")
 
-        endpoint = get_env("DOCUMENT_INTELLIGENCE_ENDPOINT")
-        api_key = get_env("DOCUMENT_INTELLIGENCE_API_KEY")
+        if not use_local and endpoint and api_key:
+            try:
+                self.client = DocumentIntelligenceClient(
+                    endpoint=endpoint,
+                    credential=AzureKeyCredential(api_key),
+                    retry_total=0,
+                    retry_backoff_factor=0,
+                    retry_backoff_max=0,
+                )
+            except Exception as e:
+                logger.warning(f"Could not initialize Azure DI Client: {e}")
+                self.client = None
+        else:
+            self.client = None
 
-        if not endpoint:
-            raise ValueError(
-                "document-intelligence-endpoint is not configured."
-            )
-
-        if not api_key:
-            raise ValueError(
-                "document-intelligence-api-key is not configured."
-            )
-
-        self.client = DocumentIntelligenceClient(
-            endpoint=endpoint,
-            credential=AzureKeyCredential(api_key),
-        )
-
-    def extract_contract(self, document_path: str) -> Dict[str, Any]:
+    def extract_contract(self, document_path: str, storage: Any = None) -> Dict[str, Any]:
         """
         Extract contract information using Azure Document Intelligence.
         """
+        effective_storage = storage or self.storage
+        if effective_storage and effective_storage.exists(document_path):
+            doc_bytes = effective_storage.read_bytes(document_path)
+        else:
+            path = Path(document_path)
+            if path.exists() and path.is_file():
+                doc_bytes = path.read_bytes()
+            elif (Path("data") / document_path).exists() and (Path("data") / document_path).is_file():
+                doc_bytes = (Path("data") / document_path).read_bytes()
+            else:
+                try:
+                    from app.storage.document_io import read_document_bytes
+                    doc_bytes = read_document_bytes(document_path, storage=effective_storage)
+                except Exception:
+                    raise FileNotFoundError(
+                        f"Document not found: {document_path}"
+                    )
 
-        document = open_document_stream(
-            document_path,
-            storage=self.storage,
-        )
+        result = None
+        if self.client:
+            try:
+                poller = self.client.begin_analyze_document(
+                    "prebuilt-layout",
+                    body=doc_bytes,
+                    polling_interval=1,
+                )
+                result = poller.result()
+            except Exception as err:
+                logger.warning(
+                    f"Azure Document Intelligence error ({err}). Switching to fast local extractor."
+                )
+                self.client = None  # Circuit breaker
 
-        poller = self.client.begin_analyze_document(
-            "prebuilt-layout",
-            body=document,
-        )
-
-        result = poller.result()
+        if result is None:
+            from app.capabilities.local_pdf_extractor import parse_pdf_layout_locally
+            result = parse_pdf_layout_locally(doc_bytes)
 
         paragraphs = self._get_paragraphs(result)
 
         return {
-            "document_path": document_path,
+            "document_path": str(document_path),
 
             "contract_number": self._extract_contract_number(
                 paragraphs
