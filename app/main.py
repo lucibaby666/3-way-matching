@@ -32,6 +32,22 @@ async def health_check():
     }
 
 
+@app.on_event("startup")
+async def startup_event():
+    # Ensure local folders exist
+    Path("logs").mkdir(parents=True, exist_ok=True)
+    Path("outputs").mkdir(parents=True, exist_ok=True)
+    try:
+        from database_operations import create_audit_tables, verify_database_connection
+        connected, msg = verify_database_connection()
+        if connected:
+            create_audit_tables()
+    except Exception:
+        pass
+
+
+
+
 app.include_router(auth_router)
 app.include_router(router)
 app.include_router(dashboard_router)

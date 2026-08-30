@@ -23,9 +23,16 @@ class ContractExtractor:
 
     def __init__(self, storage: Any = None):
         self.storage = storage
-        use_local = os.getenv("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
-        endpoint = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
-        api_key = os.getenv("DOCUMENT_INTELLIGENCE_API_KEY")
+        try:
+            from secrets_manager import get_secret
+        except ImportError:
+            def get_secret(k, default=""):
+                return os.getenv(k, default)
+
+        use_local = get_secret("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
+        endpoint = get_secret("DOCUMENT_INTELLIGENCE_ENDPOINT")
+        api_key = get_secret("DOCUMENT_INTELLIGENCE_API_KEY")
+
 
         if not use_local and endpoint and api_key:
             try:

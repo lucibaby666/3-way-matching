@@ -20,12 +20,14 @@ except ImportError:
 
 
 def get_db_connection():
-    """Get SQL Server database connection"""
+    """Get SQL Server / Azure SQL database connection"""
     try:
         if DB_CONFIG.get('trusted_connection') == 'yes':
-            conn_str = f"DRIVER={DB_CONFIG['driver']};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};Trusted_Connection=yes"
+            conn_str = f"DRIVER={DB_CONFIG['driver']};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};Trusted_Connection=yes;"
         else:
-            conn_str = f"DRIVER={DB_CONFIG['driver']};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};UID={DB_CONFIG['uid']};PWD={DB_CONFIG['pwd']}"
+            encrypt = DB_CONFIG.get('Encrypt', DB_CONFIG.get('encrypt', 'yes'))
+            trust_cert = DB_CONFIG.get('TrustServerCertificate', DB_CONFIG.get('trust_server_certificate', 'yes'))
+            conn_str = f"DRIVER={DB_CONFIG['driver']};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};UID={DB_CONFIG['uid']};PWD={DB_CONFIG['pwd']};Encrypt={encrypt};TrustServerCertificate={trust_cert};Connection Timeout=30;"
         
         connection = pyodbc.connect(conn_str, timeout=30)
         return connection
@@ -33,6 +35,7 @@ def get_db_connection():
         print(f"⚠️ Database connection failed: {e}")
         logger.error(f"Database connection failed: {e}")
         return None
+
 
 
 def create_audit_tables():
@@ -135,6 +138,23 @@ def create_audit_tables():
             )
         """)
         
+        # Add missing columns to audit_statistics if it was created previously with older schema
+        cursor.execute("""
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = 'audit_statistics')
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('audit_statistics') AND name = 'matching_status')
+                    ALTER TABLE audit_statistics ADD matching_status NVARCHAR(50);
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('audit_statistics') AND name = 'exception_count')
+                    ALTER TABLE audit_statistics ADD exception_count INT;
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('audit_statistics') AND name = 'hitl_case_id')
+                    ALTER TABLE audit_statistics ADD hitl_case_id NVARCHAR(100);
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('audit_statistics') AND name = 'evidence_dir')
+                    ALTER TABLE audit_statistics ADD evidence_dir NVARCHAR(500);
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('audit_statistics') AND name = 'inserted_at')
+                    ALTER TABLE audit_statistics ADD inserted_at DATETIME DEFAULT GETDATE();
+            END
+        """)
+        
         conn.commit()
         conn.close()
         return True
@@ -143,6 +163,7 @@ def create_audit_tables():
         logger.warning(f"Table creation warning: {e}")
         conn.close()
         return True
+
 
 
 def insert_audit_to_db(audit_entry):
@@ -230,10 +251,45 @@ def insert_statistics_to_db(stats):
         conn.close()
         return run_id
     except Exception as e:
-        print(f"⚠️ Failed to insert statistics: {e}")
-        logger.error(f"Failed to insert statistics: {e}")
-        conn.close()
+        # Try self-healing schema migration once
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        try:
+            create_audit_tables()
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO audit_statistics 
+                    (run_id, generated_at, total_entries, info_count, warning_count, high_count, critical_count,
+                     status_success, status_failed, matching_status, exception_count, hitl_case_id, evidence_dir)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    run_id,
+                    datetime.now(),
+                    stats.get('total_entries', 0),
+                    stats.get('severity_counts', {}).get('INFO', 0),
+                    stats.get('severity_counts', {}).get('WARNING', 0),
+                    stats.get('severity_counts', {}).get('HIGH', 0),
+                    stats.get('severity_counts', {}).get('CRITICAL', 0),
+                    stats.get('status_counts', {}).get('SUCCESS', 0),
+                    stats.get('status_counts', {}).get('FAILED', 0),
+                    stats.get('matching_status', 'UNKNOWN'),
+                    stats.get('exception_count', 0),
+                    stats.get('hitl_case_id', None),
+                    stats.get('evidence_dir', '')
+                ))
+                conn.commit()
+                conn.close()
+                return run_id
+        except Exception as retry_err:
+            print(f"⚠️ Failed to insert statistics: {retry_err}")
+            logger.error(f"Failed to insert statistics: {retry_err}")
         return None
+
 
 
 def verify_database_connection():
