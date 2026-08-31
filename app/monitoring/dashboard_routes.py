@@ -15,6 +15,7 @@ HTTP endpoints backing the monitoring dashboard pages.
 
 import asyncio
 import time
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -108,3 +109,81 @@ async def audit_kpis(
     return await asyncio.to_thread(
         summarize_audit, float(hours)
     )
+
+
+@router.get("/logs")
+async def get_logs_endpoint(
+    limit: int = Query(default=200, ge=1, le=1000),
+    severity: Optional[str] = Query(default=None),
+    event_type: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
+    source: str = Query(default="all"),
+    user: UserAccount = Depends(require_admin_or_audit),
+) -> dict:
+    """
+    Query real-time structured logs from SQL Server audit tables
+    and system log files with multi-criteria filtering.
+    """
+    from app.monitoring.log_service import get_aggregated_logs
+
+    logs = await asyncio.to_thread(
+        get_aggregated_logs,
+        limit=limit,
+        severity=severity,
+        event_type=event_type,
+        search=search,
+        source=source,
+    )
+    return {
+        "total": len(logs),
+        "logs": logs,
+    }
+
+
+@router.get("/logs/stats")
+async def get_log_stats_endpoint(
+    user: UserAccount = Depends(require_admin_or_audit),
+) -> dict:
+    """
+    Retrieve aggregated log KPIs, severity breakdown, and event timeline.
+    """
+    from app.monitoring.log_service import get_log_dashboard_stats
+
+    return await asyncio.to_thread(get_log_dashboard_stats)
+
+
+@router.get("/logs/export")
+async def export_logs_endpoint(
+    format: str = Query(default="json", regex="^(json|csv)$"),
+    limit: int = Query(default=500, ge=1, le=2000),
+    severity: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
+    user: UserAccount = Depends(require_admin_or_audit),
+):
+    """
+    Export filtered audit logs as JSON or CSV download.
+    """
+    from fastapi.responses import Response
+    from app.monitoring.log_service import get_aggregated_logs, export_logs_as_csv
+
+    logs = await asyncio.to_thread(
+        get_aggregated_logs,
+        limit=limit,
+        severity=severity,
+        search=search,
+    )
+
+    if format == "csv":
+        csv_data = export_logs_as_csv(logs)
+        return Response(
+            content=csv_data,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=audit_logs_{time.strftime('%Y%m%d_%H%M%S')}.csv"},
+        )
+
+    return {
+        "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "total": len(logs),
+        "logs": logs,
+    }
+

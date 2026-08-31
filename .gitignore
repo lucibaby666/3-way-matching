@@ -5,3 +5,7 @@
 __pycache__
 data/
 evidence_demo/
+logs/
+outputs/evidence/
+outputs/email_alerts/
+chroma_db_store/

@@ -510,15 +510,39 @@ def summarize_audit(
 
     decision_types: Counter = Counter()
     per_reviewer: Counter = Counter()
+    reviewer_breakdown: Dict[str, Dict[str, int]] = {}
+    decisions_by_date_map: Dict[str, Dict[str, int]] = {}
 
     for decision in decisions:
-        if decision.get("decision"):
-            decision_types[
-                decision["decision"]
-            ] += 1
+        dec_type = str(decision.get("decision") or "UNKNOWN").upper()
+        reviewer = str(decision.get("reviewer") or "system")
+        ts = str(decision.get("timestamp") or "")
+        date_key = ts[:10] if len(ts) >= 10 else "Unknown"
 
-        if decision.get("reviewer"):
-            per_reviewer[decision["reviewer"]] += 1
+        if dec_type:
+            decision_types[dec_type] += 1
+
+        if reviewer:
+            per_reviewer[reviewer] += 1
+            if reviewer not in reviewer_breakdown:
+                reviewer_breakdown[reviewer] = {"total": 0, "APPROVE": 0, "REJECT": 0, "OVERRIDE": 0}
+            reviewer_breakdown[reviewer]["total"] += 1
+            if dec_type in reviewer_breakdown[reviewer]:
+                reviewer_breakdown[reviewer][dec_type] += 1
+
+        if date_key != "Unknown":
+            if date_key not in decisions_by_date_map:
+                decisions_by_date_map[date_key] = {"APPROVE": 0, "REJECT": 0, "OVERRIDE": 0}
+            if dec_type in decisions_by_date_map[date_key]:
+                decisions_by_date_map[date_key][dec_type] += 1
+
+    sorted_dates = sorted(decisions_by_date_map.keys())
+    decisions_timeline = {
+        "dates": sorted_dates,
+        "approved": [decisions_by_date_map[d]["APPROVE"] for d in sorted_dates],
+        "rejected": [decisions_by_date_map[d]["REJECT"] for d in sorted_dates],
+        "override": [decisions_by_date_map[d]["OVERRIDE"] for d in sorted_dates],
+    }
 
     recent_decisions = sorted(
         decisions,
@@ -535,6 +559,24 @@ def summarize_audit(
         for exception_type, count in types.items():
             exception_counter[exception_type] += count
             total_exceptions += count
+
+    # AI vs Human calculations
+    auto_app_count = 0
+    for r in completed_runs:
+        auto_app_count += r.get("auto_approved_count", 0)
+
+    human_app = decision_types.get("APPROVE", 0)
+    human_rej = decision_types.get("REJECT", 0)
+    human_ovr = decision_types.get("OVERRIDE", 0)
+    auto_rej = max(0, total_exceptions - (auto_app_count + human_app + human_ovr))
+
+    ai_vs_human = {
+        "auto_approved": auto_app_count,
+        "human_approved": human_app,
+        "auto_rejected": auto_rej,
+        "human_rejected": human_rej,
+        "human_override": human_ovr,
+    }
 
     return {
         "window_hours": limit_hours,
@@ -553,6 +595,8 @@ def summarize_audit(
         "decisions": {
             "total": len(decisions),
             "by_type": dict(decision_types),
+            "timeline": decisions_timeline,
+            "ai_vs_human": ai_vs_human,
             "avg_resolution_hours": round(
                 sum(resolution_hours)
                 / len(resolution_hours),
@@ -562,6 +606,7 @@ def summarize_audit(
             else None,
         },
         "reviewers": dict(per_reviewer),
+        "reviewer_breakdown": reviewer_breakdown,
         "exceptions_by_type": dict(exception_counter),
         "exceptions_total": total_exceptions,
         "recent_decisions": recent_decisions,

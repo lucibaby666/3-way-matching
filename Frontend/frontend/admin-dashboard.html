@@ -54,9 +54,13 @@
     <h1>Admin Dashboard</h1>
     <span>Pipeline health &bull; Azure platform &bull; System</span>
   </div>
-  <a href="/" class="btn btn-light" style="margin-left:auto">&larr; Matching</a>
-  <span id="userBadge" style="font-size:.85rem;opacity:.9"></span>
-  <button class="btn btn-light" onclick="logout()">Logout</button>
+  <div style="display:flex;gap:8px;margin-left:auto;align-items:center">
+    <a href="/" class="btn btn-light">&larr; Matching</a>
+    <a href="/audit-dashboard.html" class="btn btn-light">Audit KPIs</a>
+    <a href="/logs-dashboard.html" class="btn btn-light">Live Logs</a>
+    <span id="userBadge" style="font-size:.85rem;opacity:.9;margin-left:6px"></span>
+    <button class="btn btn-light" onclick="logout()">Logout</button>
+  </div>
 </header>
 
 <script>
@@ -92,6 +96,20 @@ async function logout() {
 
     <!-- KPI cards -->
     <div class="kpi-grid" id="kpiGrid"></div>
+
+    <!-- ⭐ Dedicated Logs Dashboard Hyperlink Banner -->
+    <div class="card" style="background:linear-gradient(135deg,#1e293b,#0f172a);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border:none;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:14px">
+        <span style="font-size:1.8rem">📊</span>
+        <div>
+          <h3 style="font-size:1.05rem;font-weight:700;margin-bottom:2px;color:#fff">Live Log &amp; Audit Trail Visualizations</h3>
+          <p style="font-size:.82rem;opacity:.85;margin:0">Explore real-time error trends, event category charts, and per-user decision analytics.</p>
+        </div>
+      </div>
+      <a href="/logs-dashboard.html" class="btn btn-primary" style="background:#2563eb;color:#fff;text-decoration:none;white-space:nowrap;padding:10px 18px;font-weight:600;display:inline-flex;align-items:center;gap:6px">
+        Open Logs Dashboard &rarr;
+      </a>
+    </div>
 
     <!-- Charts -->
     <div class="chart-row">
