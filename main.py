@@ -253,13 +253,13 @@ def run_human_review(exceptions, smart_approval, logger):
                     "field": str(exception.field) if hasattr(exception, 'field') else 'UNKNOWN',
                     "expected": exception.expected if hasattr(exception, 'expected') else 'N/A',
                     "actual": exception.actual if hasattr(exception, 'actual') else 'N/A',
-                    "tolerance": getattr(exception, "tolerance", None),
-                    "evidence": exception.evidence if hasattr(exception, 'evidence') else []
-                }
+                    tolerance=getattr(exception, "tolerance", None),
+                    evidence=exception.evidence if hasattr(exception, 'evidence') else []
+                )
                 smart_approval.store_human_decision(
                     exception_dict,
                     decision="APPROVED",
-                    reviewer="reviewer-001",
+                    reviewer=os.getenv("DB_USERNAME", "umarwani"),
                     comment="Approved by reviewer"
                 )
             return "APPROVED"
@@ -269,22 +269,23 @@ def run_human_review(exceptions, smart_approval, logger):
             logger.info("❌ ALL EXCEPTIONS REJECTED!")
             
             for exception in exceptions:
-                exception_dict = {
-                    "type": str(exception.type) if hasattr(exception, 'type') else 'UNKNOWN',
-                    "item_code": exception.item_code if hasattr(exception, 'item_code') else 'UNKNOWN',
-                    "field": str(exception.field) if hasattr(exception, 'field') else 'UNKNOWN',
-                    "expected": exception.expected if hasattr(exception, 'expected') else 'N/A',
-                    "actual": exception.actual if hasattr(exception, 'actual') else 'N/A',
-                    "tolerance": getattr(exception, "tolerance", None),
-                    "evidence": exception.evidence if hasattr(exception, 'evidence') else []
-                }
+                exception_dict = dict(
+                    type=str(exception.type) if hasattr(exception, 'type') else 'UNKNOWN',
+                    item_code=exception.item_code if hasattr(exception, 'item_code') else 'UNKNOWN',
+                    field=str(exception.field) if hasattr(exception, 'field') else 'UNKNOWN',
+                    expected=exception.expected if hasattr(exception, 'expected') else 'N/A',
+                    actual=exception.actual if hasattr(exception, 'actual') else 'N/A',
+                    tolerance=getattr(exception, "tolerance", None),
+                    evidence=exception.evidence if hasattr(exception, 'evidence') else []
+                )
                 smart_approval.store_human_decision(
                     exception_dict,
                     decision="REJECTED",
-                    reviewer="reviewer-001",
+                    reviewer=os.getenv("DB_USERNAME", "umarwani"),
                     comment="Rejected by reviewer"
                 )
             return "REJECTED"
+
             
         elif user_input == "SKIP":
             print("\n⏭️ Skipping review")
@@ -317,6 +318,19 @@ async def main():
         print("   3. The app folder is in your PYTHONPATH")
         return
     
+    # Initialize and verify Database
+    print("\n🔍 Checking Database Connection...")
+    conn = get_db_connection()
+    if conn:
+        print("   ✅ Connected to Database successfully")
+        logger.info("Connected to Database successfully")
+        create_audit_tables()
+        conn.close()
+    else:
+        print("   ⚠️ Database not connected. Audit logs will only be written to local files.")
+        print("   💡 Tip: Check your Azure SQL credentials in .env")
+        logger.warning("Database not connected. Audit logs will only be written to local files.")
+
     # Initialize Smart Approval
     smart_approval = SmartApprovalSystem(threshold=0.95)
     
