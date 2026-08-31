@@ -1,6 +1,5 @@
 # ============================================================
 # AZURE SQL DATABASE CONFIGURATION
-# (Supports Azure Key Vault with automatic .env fallback)
 # ============================================================
 import os
 from pathlib import Path
@@ -11,20 +10,15 @@ env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path)
 load_dotenv()
 
-# Import Key Vault / Secrets Manager
-def get_secret(k, default=""):
-    return os.getenv(k, default)
-
 DB_CONFIG = {
-    'driver': get_secret('DB_DRIVER', '{ODBC Driver 18 for SQL Server}'),
-    'server': get_secret('DB_SERVER', 'threewaymatching.database.windows.net'),
-    'database': get_secret('DB_NAME') or get_secret('DB_DATABASE', 'threewaymatching'),
-    'uid': get_secret('DB_USERNAME') or get_secret('DB_UID', 'umarwani'),
-    'pwd': get_secret('DB_PASSWORD') or get_secret('DB_PWD', 'Git@901#'),
-    'trusted_connection': get_secret('DB_TRUSTED_CONNECTION', 'no'),
-    'Encrypt': get_secret('DB_ENCRYPT', 'yes'),
-    'TrustServerCertificate': get_secret('DB_TRUST_SERVER_CERTIFICATE', 'yes'),
-    'Connection Timeout': 30
+    'driver': os.getenv('DB_DRIVER', '{ODBC Driver 18 for SQL Server}'),
+    'server': os.getenv('DB_SERVER', 'threewaymatching.database.windows.net'),
+    'database': os.getenv('DB_NAME') or os.getenv('DB_DATABASE', 'threewaymatching'),
+    'uid': os.getenv('DB_USERNAME') or os.getenv('DB_UID', 'umarwani'),
+    'pwd': os.getenv('DB_PASSWORD') or os.getenv('DB_PWD', 'Git@901#'),
+    'trusted_connection': os.getenv('DB_TRUSTED_CONNECTION', 'no'),
+    'Encrypt': os.getenv('DB_ENCRYPT', 'yes'),
+    'TrustServerCertificate': os.getenv('DB_TRUST_SERVER_CERTIFICATE', 'yes')
 }
 
 # Debug: Print config (hide password)

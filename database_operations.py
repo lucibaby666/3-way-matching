@@ -27,7 +27,7 @@ def get_db_connection():
         else:
             encrypt = DB_CONFIG.get('Encrypt', DB_CONFIG.get('encrypt', 'yes'))
             trust_cert = DB_CONFIG.get('TrustServerCertificate', DB_CONFIG.get('trust_server_certificate', 'yes'))
-            conn_str = f"DRIVER={DB_CONFIG['driver']};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};UID={DB_CONFIG['uid']};PWD={DB_CONFIG['pwd']};Encrypt={encrypt};TrustServerCertificate={trust_cert};Connection Timeout=30;"
+            conn_str = f"DRIVER={DB_CONFIG['driver']};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};UID={DB_CONFIG['uid']};PWD={DB_CONFIG['pwd']};Encrypt={encrypt};TrustServerCertificate={trust_cert};"
         
         connection = pyodbc.connect(conn_str, timeout=30)
         return connection
@@ -328,32 +328,58 @@ def get_audit_count():
         return 0
 
 
-def get_recent_audit_logs(limit=100):
-    """Get recent audit logs"""
+def get_recent_audit_logs(limit=200, severity=None, event_type=None, search=None):
+    """Get recent audit logs with optional filters"""
     conn = get_db_connection()
     if not conn:
         return []
     
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT TOP ? 
+        query = """
+            SELECT TOP (?) 
                 audit_id, event_type, severity, [user], action, 
-                status, inserted_at
+                resource, resource_type, status, error, metadata, inserted_at
             FROM audit_logs
-            ORDER BY inserted_at DESC
-        """, (limit,))
+            WHERE 1=1
+        """
+        params = [int(limit)]
+        if severity and severity.upper() != 'ALL':
+            query += " AND UPPER(severity) = ?"
+            params.append(severity.upper())
+        if event_type and event_type.upper() != 'ALL':
+            query += " AND UPPER(event_type) = ?"
+            params.append(event_type.upper())
+        if search:
+            query += " AND (action LIKE ? OR audit_id LIKE ? OR resource LIKE ? OR [user] LIKE ? OR error LIKE ?)"
+            s_param = f"%{search}%"
+            params.extend([s_param, s_param, s_param, s_param, s_param])
+            
+        query += " ORDER BY inserted_at DESC"
+        
+        cursor.execute(query, params)
         
         logs = []
         for row in cursor.fetchall():
+            meta = row[9]
+            if meta and isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    pass
             logs.append({
                 'audit_id': row[0],
                 'event_type': row[1],
                 'severity': row[2],
-                'user': row[3],
-                'action': row[4],
-                'status': row[5],
-                'inserted_at': row[6]
+                'user': row[3] or 'system',
+                'action': row[4] or '',
+                'resource': row[5] or '',
+                'resource_type': row[6] or '',
+                'status': row[7] or 'SUCCESS',
+                'error': row[8],
+                'metadata': meta or {},
+                'inserted_at': row[10].isoformat() if hasattr(row[10], 'isoformat') else str(row[10]),
+                'source': 'database'
             })
         
         cursor.close()
@@ -361,5 +387,9 @@ def get_recent_audit_logs(limit=100):
         return logs
     except Exception as e:
         print(f"⚠️ Failed to get audit logs: {e}")
-        conn.close()
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
         return []

@@ -92,20 +92,17 @@ class DocumentSnip:
             min_y -= height * padding
             max_y += height * padding
 
-            # Keep crop inside the page.
-            page_rect = page.rect
-
-            min_x = max(min_x, page_rect.x0)
-            min_y = max(min_y, page_rect.y0)
-            max_x = min(max_x, page_rect.x1)
-            max_y = min(max_y, page_rect.y1)
-
+            # Convert inches to points (72 pt per inch) and clamp to page
             crop_rect = fitz.Rect(
                 min_x * 72,
                 min_y * 72,
                 max_x * 72,
                 max_y * 72,
             )
+            # Ensure crop_rect stays strictly within the page boundaries
+            crop_rect = crop_rect & page.rect
+            if crop_rect.is_empty or crop_rect.is_infinite:
+                crop_rect = page.rect
 
             # Render at 2x resolution for readable evidence.
             matrix = fitz.Matrix(2, 2)
