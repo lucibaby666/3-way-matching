@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -5,6 +6,10 @@ from typing import Any, Dict, List, Optional
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
+
+from app.env import get_env
+
+logger = logging.getLogger(__name__)
 
 
 load_dotenv()
@@ -22,15 +27,10 @@ class InvoiceExtractor:
 
     def __init__(self, storage: Any = None):
         self.storage = storage
-        try:
-            from secrets_manager import get_secret
-        except ImportError:
-            def get_secret(k, default=""):
-                return os.getenv(k, default)
 
-        use_local = get_secret("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
-        endpoint = get_secret("DOCUMENT_INTELLIGENCE_ENDPOINT")
-        api_key = get_secret("DOCUMENT_INTELLIGENCE_API_KEY")
+        use_local = get_env("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
+        endpoint = get_env("DOCUMENT_INTELLIGENCE_ENDPOINT")
+        api_key = get_env("DOCUMENT_INTELLIGENCE_API_KEY")
 
 
         if not use_local and endpoint and api_key:
@@ -351,4 +351,104 @@ class InvoiceExtractor:
                 }
             )
 
+        return line_items
+
+    @staticmethod
+    def _line_items_are_merged(items: List[Dict[str, Any]]) -> bool:
+        if not items:
+            return False
+        for item in items:
+            val = item.get("item_code", {}).get("value", "")
+            if "\n" in str(val):
+                return True
+        return False
+
+    @staticmethod
+    def _table_columns(table: Any) -> Optional[Dict[str, int]]:
+        cells_map = {(c.row_index, c.column_index): c for c in table.cells}
+        cols: Dict[str, int] = {}
+        for c_idx in range(table.column_count):
+            cell = cells_map.get((0, c_idx))
+            if not cell:
+                continue
+            h = cell.content.lower().strip()
+            if "item" in h and "code" in h:
+                cols["item_code"] = c_idx
+            elif "description" in h:
+                cols["description"] = c_idx
+            elif "qty" in h or "quantity" in h:
+                cols["quantity"] = c_idx
+            elif "unit" in h and "price" not in h:
+                cols["unit"] = c_idx
+            elif "unit price" in h or "price" in h:
+                cols["unit_price"] = c_idx
+            elif "amount" in h:
+                cols["amount"] = c_idx
+        if "item_code" not in cols:
+            return None
+        return cols
+
+    def _extract_line_items_from_tables(
+        self, tables: List[Any]
+    ) -> List[Dict[str, Any]]:
+        line_items: List[Dict[str, Any]] = []
+        for table in tables:
+            cols = self._table_columns(table)
+            if not cols:
+                continue
+            cells_map = {(c.row_index, c.column_index): c for c in table.cells}
+
+            def _row_union_src(r: int):
+                all_regions = []
+                for c in range(table.column_count):
+                    cell = cells_map.get((r, c))
+                    if cell and cell.bounding_regions:
+                        all_regions.extend(cell.bounding_regions)
+                if not all_regions:
+                    return []
+                page = all_regions[0].page_number
+                all_x = []
+                all_y = []
+                for region in all_regions:
+                    flat = list(region.polygon)
+                    for i in range(0, len(flat), 2):
+                        all_x.append(flat[i])
+                        all_y.append(flat[i + 1])
+                polygon = [
+                    {"x": min(all_x), "y": min(all_y)},
+                    {"x": max(all_x), "y": min(all_y)},
+                    {"x": max(all_x), "y": max(all_y)},
+                    {"x": min(all_x), "y": max(all_y)},
+                ]
+                return [{"page_number": page, "polygon": polygon}]
+
+            for r in range(1, table.row_count):
+                item_code_cell = cells_map.get((r, cols.get("item_code")))
+                if not item_code_cell or not item_code_cell.content:
+                    continue
+
+                desc_cell = cells_map.get((r, cols.get("description")))
+                qty_cell = cells_map.get((r, cols.get("quantity")))
+                unit_cell = cells_map.get((r, cols.get("unit")))
+                price_cell = cells_map.get((r, cols.get("unit_price")))
+                amt_cell = cells_map.get((r, cols.get("amount")))
+
+                row_src = _row_union_src(r)
+
+                item = {
+                    "item_code": {"value": item_code_cell.content, "source": row_src},
+                    "description": {"value": desc_cell.content if desc_cell else "", "source": []},
+                }
+                if qty_cell:
+                    item["quantity"] = {"value": qty_cell.content, "source": row_src}
+                if unit_cell:
+                    item["unit"] = {"value": unit_cell.content, "source": row_src}
+                if price_cell:
+                    item["unit_price"] = {"value": price_cell.content, "source": row_src}
+                if amt_cell:
+                    item["amount"] = {"value": amt_cell.content, "source": row_src}
+
+                line_items.append(item)
+            if line_items:
+                break
         return line_items

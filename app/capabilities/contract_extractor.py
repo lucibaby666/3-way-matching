@@ -10,6 +10,8 @@ from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
 
+from app.env import get_env
+
 
 load_dotenv()
 
@@ -26,15 +28,10 @@ class ContractExtractor:
 
     def __init__(self, storage: Any = None):
         self.storage = storage
-        try:
-            from secrets_manager import get_secret
-        except ImportError:
-            def get_secret(k, default=""):
-                return os.getenv(k, default)
 
-        use_local = get_secret("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
-        endpoint = get_secret("DOCUMENT_INTELLIGENCE_ENDPOINT")
-        api_key = get_secret("DOCUMENT_INTELLIGENCE_API_KEY")
+        use_local = get_env("USE_LOCAL_EXTRACTOR", "false").strip().lower() in {"1", "true", "yes"}
+        endpoint = get_env("DOCUMENT_INTELLIGENCE_ENDPOINT")
+        api_key = get_env("DOCUMENT_INTELLIGENCE_API_KEY")
 
 
         if not use_local and endpoint and api_key:

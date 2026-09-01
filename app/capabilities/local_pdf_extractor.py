@@ -114,50 +114,93 @@ def extract_invoice_locally(doc_bytes: bytes, document_path: str) -> Dict[str, A
     line_items = []
     layout = parse_pdf_layout_locally(doc_bytes)
     
+    def _table_columns(table):
+        """Read header row to map column indices by name."""
+        cells_map = {(c.row_index, c.column_index): c for c in table.cells}
+        header = cells_map.get((0, 0)) or cells_map.get((0, 1))
+        if not header:
+            return None
+
+        cols = {}
+        for c_idx in range(table.column_count):
+            cell = cells_map.get((0, c_idx))
+            if not cell:
+                continue
+            h = cell.content.lower().strip()
+            if "item" in h and "code" in h:
+                cols["item_code"] = c_idx
+            elif "description" in h:
+                cols["description"] = c_idx
+            elif "qty" in h or "quantity" in h:
+                cols["quantity"] = c_idx
+            elif "unit" in h and "price" not in h:
+                cols["unit"] = c_idx
+            elif "unit price" in h or "price" in h:
+                cols["unit_price"] = c_idx
+            elif "amount" in h:
+                cols["amount"] = c_idx
+        return cols if "item_code" in cols else None
+    
+    def _line_items_are_merged(items):
+        """Check if line items are merged (e.g., all item codes in one cell)."""
+        if not items:
+            return False
+        for item in items:
+            val = item.get("item_code", {}).get("value", "")
+            if "\n" in val:
+                return True
+        return False
+
     # Try parsing items from table or text lines
     found_items = False
     if layout.tables:
-        t = layout.tables[0]
-        cells_map = {(c.row_index, c.column_index): c for c in t.cells}
-        for r in range(1, t.row_count):
-            item_code_cell = cells_map.get((r, 0))
-            desc_cell = cells_map.get((r, 1))
-            qty_cell = cells_map.get((r, 2))
-            price_cell = cells_map.get((r, 3))
-            amt_cell = cells_map.get((r, 4))
+        for t in layout.tables:
+            cols = _table_columns(t)
+            if not cols:
+                continue
+            
+            cells_map = {(c.row_index, c.column_index): c for c in t.cells}
+            for r in range(1, t.row_count):
+                item_code_cell = cells_map.get((r, cols.get("item_code")))
+                desc_cell = cells_map.get((r, cols.get("description")))
+                qty_cell = cells_map.get((r, cols.get("quantity")))
+                price_cell = cells_map.get((r, cols.get("unit_price")))
+                amt_cell = cells_map.get((r, cols.get("amount")))
 
-            if item_code_cell and item_code_cell.content:
-                def clean_num(val_str):
-                    cleaned = re.sub(r"[^\d.]", "", val_str)
-                    return float(cleaned) if cleaned else 0.0
+                if item_code_cell and item_code_cell.content:
+                    def clean_num(val_str):
+                        cleaned = re.sub(r"[^\d.]", "", str(val_str))
+                        return float(cleaned) if cleaned else 0.0
 
-                qty_val = clean_num(qty_cell.content if qty_cell else "0")
-                price_val = clean_num(price_cell.content if price_cell else "0")
-                amt_val = clean_num(amt_cell.content if amt_cell else "0") or round(qty_val * price_val, 2)
+                    qty_val = clean_num(qty_cell.content if qty_cell else "0")
+                    price_val = clean_num(price_cell.content if price_cell else "0")
+                    amt_val = clean_num(amt_cell.content if amt_cell else "0") or round(qty_val * price_val, 2)
 
-                line_items.append({
-                    "item_code": {
-                        "value": item_code_cell.content,
-                        "source": [{"page_number": 1, "polygon": [{"x": 1.0, "y": 2.0}]}]
-                    },
-                    "description": {
-                        "value": desc_cell.content if desc_cell else "",
-                        "source": []
-                    },
-                    "quantity": {
-                        "value": qty_val,
-                        "source": [{"page_number": 1, "polygon": [{"x": 2.0, "y": 2.0}]}]
-                    },
-                    "unit_price": {
-                        "value": price_val,
-                        "source": [{"page_number": 1, "polygon": [{"x": 3.0, "y": 2.0}]}]
-                    },
-                    "amount": {
-                        "value": amt_val,
-                        "source": [{"page_number": 1, "polygon": [{"x": 4.0, "y": 2.0}]}]
-                    }
-                })
-                found_items = True
+                    line_items.append({
+                        "item_code": {
+                            "value": item_code_cell.content,
+                            "source": [{"page_number": 1, "polygon": [{"x": 1.0, "y": 2.0}]}]
+                        },
+                        "description": {
+                            "value": desc_cell.content if desc_cell else "",
+                            "source": []
+                        },
+                        "quantity": {
+                            "value": qty_val,
+                            "source": [{"page_number": 1, "polygon": [{"x": 2.0, "y": 2.0}]}]
+                        },
+                        "unit_price": {
+                            "value": price_val,
+                            "source": [{"page_number": 1, "polygon": [{"x": 3.0, "y": 2.0}]}]
+                        },
+                        "amount": {
+                            "value": amt_val,
+                            "source": [{"page_number": 1, "polygon": [{"x": 4.0, "y": 2.0}]}]
+                        }
+                    })
+                    found_items = True
+            if found_items:
+                break
 
     # Fallback text regex for line items if tables weren't parsed
     if not found_items:
