@@ -1,4 +1,5 @@
 import os
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -8,6 +9,8 @@ from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
 
 from app.env import get_env
+
+logger = logging.getLogger(__name__)
 
 
 load_dotenv()
