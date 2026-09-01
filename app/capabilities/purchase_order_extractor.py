@@ -140,8 +140,8 @@ class PurchaseOrderExtractor:
                 paragraphs
             ),
 
-            "line_items": self._extract_line_items(
-                result
+            "line_items": self._cross_validate_line_items(
+                self._extract_line_items(result)
             ),
         }
 
@@ -309,6 +309,59 @@ class PurchaseOrderExtractor:
             "value": match.group(1).strip(),
             "source": cls._get_source(paragraph),
         }
+
+    @classmethod
+    def _cross_validate_line_items(
+        cls,
+        items: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Cross-validate line items: quantity × unit_price should ≈ amount.
+        Logs a warning when mismatch is detected but does NOT auto-correct,
+        because the invoice/PO itself may contain calculation errors.
+        """
+        if not items:
+            return items
+
+        for item in items:
+            qty_field = item.get("quantity", {})
+            price_field = item.get("unit_price", {})
+            amt_field = item.get("amount", {})
+
+            qty_val = qty_field.get("value") if qty_field else None
+            price_val = price_field.get("value") if price_field else None
+            amt_val = amt_field.get("value") if amt_field else None
+
+            try:
+                qty_f = float(str(qty_val).replace(",", "")) if qty_val else 0.0
+            except (ValueError, TypeError):
+                qty_f = 0.0
+
+            try:
+                price_f = float(str(price_val).replace(",", "")) if price_val else 0.0
+            except (ValueError, TypeError):
+                price_f = 0.0
+
+            try:
+                amt_f = float(str(amt_val).replace(",", "")) if amt_val else 0.0
+            except (ValueError, TypeError):
+                amt_f = 0.0
+
+            if qty_f > 0 and price_f > 0 and amt_f > 0:
+                expected_amount = qty_f * price_f
+                if abs(expected_amount - amt_f) / amt_f > 0.01:
+                    item_code = ""
+                    ic = item.get("item_code", {})
+                    if ic:
+                        item_code = ic.get("value", "unknown")
+                    logger.warning(
+                        f"Line item cross-validation mismatch for {item_code}: "
+                        f"quantity {qty_f} × price {price_f} = {expected_amount} "
+                        f"≠ amount {amt_f}. "
+                        f"This may indicate an OCR extraction error or a document calculation error."
+                    )
+
+        return items
 
     @staticmethod
     def _find_paragraph(

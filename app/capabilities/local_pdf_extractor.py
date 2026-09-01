@@ -216,6 +216,24 @@ def extract_invoice_locally(doc_bytes: bytes, document_path: str) -> Dict[str, A
                     "amount": {"value": float(m.group(5)), "source": [{"page_number": 1, "polygon": [{"x": 4.0, "y": 2.0}]}]}
                 })
 
+    # Cross-validate line items: quantity × unit_price should ≈ amount
+    for item in line_items:
+        qty_val = item.get("quantity", {}).get("value", 0)
+        price_val = item.get("unit_price", {}).get("value", 0)
+        amt_val = item.get("amount", {}).get("value", 0)
+
+        if qty_val and price_val and amt_val:
+            expected_amount = qty_val * price_val
+            if expected_amount > 0 and amt_val > 0:
+                if abs(expected_amount - amt_val) / amt_val > 0.01:
+                    item_code = item.get("item_code", {}).get("value", "unknown")
+                    logger.warning(
+                        f"Line item cross-validation mismatch for {item_code}: "
+                        f"quantity {qty_val} × price {price_val} = {expected_amount} "
+                        f"≠ amount {amt_val}. "
+                        f"This may indicate an OCR extraction error or an invoice calculation error."
+                    )
+
     subtotal = sum(li["amount"]["value"] for li in line_items)
     tax = round(subtotal * 0.1, 2)
     total_amount = round(subtotal + tax, 2)

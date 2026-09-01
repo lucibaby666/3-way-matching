@@ -52,6 +52,10 @@ class InvoiceExtractor:
         """
         Extract invoice information using Azure Document Intelligence.
 
+        Uses two models:
+        - prebuilt-invoice: for header fields (invoice #, date, PO ref, totals)
+        - prebuilt-layout: for line items (raw table cells, more accurate)
+
         Returns a lightweight application-level representation
         containing extracted values and source locations.
         """
@@ -73,7 +77,8 @@ class InvoiceExtractor:
                         f"Document not found: {document_path}"
                     )
 
-        result = None
+        # ── Step 1: Extract header fields using prebuilt-invoice ──
+        invoice_result = None
         if self.client:
             try:
                 poller = self.client.begin_analyze_document(
@@ -81,73 +86,111 @@ class InvoiceExtractor:
                     body=doc_bytes,
                     polling_interval=1,
                 )
-                result = poller.result()
+                invoice_result = poller.result()
             except Exception as err:
                 logger.warning(
-                    f"Azure Document Intelligence error ({err}). Switching to fast local extractor."
+                    f"Azure Document Intelligence invoice model error ({err})."
                 )
                 self.client = None  # Circuit breaker
 
-        if result is None or not getattr(result, "documents", None):
+        # ── Step 2: Extract line items using prebuilt-layout ──
+        layout_result = None
+        if self.client:
+            try:
+                poller = self.client.begin_analyze_document(
+                    "prebuilt-layout",
+                    body=doc_bytes,
+                    polling_interval=1,
+                )
+                layout_result = poller.result()
+            except Exception as err:
+                logger.warning(
+                    f"Azure Document Intelligence layout model error ({err})."
+                )
+                self.client = None  # Circuit breaker
+
+        # ── Fallback: local PDF extractor if both models fail ──
+        if invoice_result is None and layout_result is None:
             from app.capabilities.local_pdf_extractor import extract_invoice_locally
             return extract_invoice_locally(doc_bytes, document_path)
 
-        document_result = result.documents[0]
-        fields = document_result.fields
+        # ── Extract header fields from prebuilt-invoice ──
+        if invoice_result is not None and getattr(invoice_result, "documents", None):
+            document_result = invoice_result.documents[0]
+            fields = document_result.fields
 
-        return {
-            "document_path": str(document_path),
+            header = {
+                "document_path": str(document_path),
 
-            "invoice_number": self._get_field_with_source(
-                fields,
-                "InvoiceId",
-            ),
+                "invoice_number": self._get_field_with_source(
+                    fields, "InvoiceId",
+                ),
 
-            "purchase_order": self._get_field_with_source(
-                fields,
-                "PurchaseOrder",
-            ),
+                "purchase_order": self._get_field_with_source(
+                    fields, "PurchaseOrder",
+                ),
 
-            "invoice_date": self._get_field_with_source(
-                fields,
-                "InvoiceDate",
-            ),
+                "invoice_date": self._get_field_with_source(
+                    fields, "InvoiceDate",
+                ),
 
-            "due_date": self._get_field_with_source(
-                fields,
-                "DueDate",
-            ),
+                "due_date": self._get_field_with_source(
+                    fields, "DueDate",
+                ),
 
-            "vendor_name": self._get_field_with_source(
-                fields,
-                "VendorName",
-            ),
+                "vendor_name": self._get_field_with_source(
+                    fields, "VendorName",
+                ),
 
-            "customer_name": self._get_field_with_source(
-                fields,
-                "CustomerName",
-            ),
+                "customer_name": self._get_field_with_source(
+                    fields, "CustomerName",
+                ),
 
-            "subtotal": self._get_field_with_source(
-                fields,
-                "SubTotal",
-            ),
+                "subtotal": self._get_field_with_source(
+                    fields, "SubTotal",
+                ),
 
-            "total_tax": self._get_field_with_source(
-                fields,
-                "TotalTax",
-            ),
+                "total_tax": self._get_field_with_source(
+                    fields, "TotalTax",
+                ),
 
-            "invoice_total": self._get_field_with_source(
-                fields,
-                "InvoiceTotal",
-            ),
+                "invoice_total": self._get_field_with_source(
+                    fields, "InvoiceTotal",
+                ),
+            }
+        else:
+            header = {
+                "document_path": str(document_path),
+                "invoice_number": None,
+                "purchase_order": None,
+                "invoice_date": None,
+                "due_date": None,
+                "vendor_name": None,
+                "customer_name": None,
+                "subtotal": None,
+                "total_tax": None,
+                "invoice_total": None,
+            }
 
-            "line_items": self._resolve_line_items(
-                self._extract_line_items(fields.get("Items")),
-                result,
-            ),
-        }
+        # ── Extract line items from prebuilt-layout tables ──
+        line_items: List[Dict[str, Any]] = []
+
+        if layout_result is not None:
+            tables = getattr(layout_result, "tables", None)
+            if tables:
+                line_items = self._extract_line_items_from_tables(tables)
+
+        # ── Fallback: try prebuilt-invoice Items field ──
+        if not line_items and invoice_result is not None:
+            if getattr(invoice_result, "documents", None):
+                fields = invoice_result.documents[0].fields
+                items_field = fields.get("Items")
+                if items_field:
+                    items = self._extract_line_items(items_field)
+                    line_items = self._resolve_line_items(items, invoice_result)
+
+        header["line_items"] = self._cross_validate_line_items(line_items)
+        return header
 
     @staticmethod
     def _get_field_value(
@@ -353,6 +396,58 @@ class InvoiceExtractor:
             )
 
         return line_items
+
+    def _cross_validate_line_items(
+        self,
+        items: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Cross-validate line items: quantity × unit_price should ≈ amount.
+        Logs a warning when mismatch is detected but does NOT auto-correct,
+        because the invoice itself may contain calculation errors.
+        """
+        if not items:
+            return items
+
+        for item in items:
+            qty_field = item.get("quantity", {})
+            price_field = item.get("unit_price", {})
+            amt_field = item.get("amount", {})
+
+            qty_val = qty_field.get("value") if qty_field else None
+            price_val = price_field.get("value") if price_field else None
+            amt_val = amt_field.get("value") if amt_field else None
+
+            try:
+                qty_f = float(str(qty_val).replace(",", "")) if qty_val else 0.0
+            except (ValueError, TypeError):
+                qty_f = 0.0
+
+            try:
+                price_f = float(str(price_val).replace(",", "")) if price_val else 0.0
+            except (ValueError, TypeError):
+                price_f = 0.0
+
+            try:
+                amt_f = float(str(amt_val).replace(",", "")) if amt_val else 0.0
+            except (ValueError, TypeError):
+                amt_f = 0.0
+
+            if qty_f > 0 and price_f > 0 and amt_f > 0:
+                expected_amount = qty_f * price_f
+                if abs(expected_amount - amt_f) / amt_f > 0.01:
+                    item_code = ""
+                    ic = item.get("item_code", {})
+                    if ic:
+                        item_code = ic.get("value", "unknown")
+                    logger.warning(
+                        f"Line item cross-validation mismatch for {item_code}: "
+                        f"quantity {qty_f} × price {price_f} = {expected_amount} "
+                        f"≠ amount {amt_f}. "
+                        f"This may indicate an OCR extraction error or an invoice calculation error."
+                    )
+
+        return items
 
     def _resolve_line_items(
         self,

@@ -62,3 +62,49 @@ def test_invoice_extraction_missing_file():
         assert False, "Expected FileNotFoundError"
     except FileNotFoundError:
         pass
+
+
+def test_cross_validation_logs_warning_on_mismatch():
+    """
+    When quantity × unit_price ≠ amount, the cross-validation
+    should log a warning but NOT auto-correct the quantity,
+    because the invoice itself may contain calculation errors.
+    """
+    extractor = InvoiceExtractor()
+
+    # Simulate extracted items with mismatch
+    items = [
+        {
+            "item_code": {"value": "FIB-001", "source": []},
+            "description": {"value": "Fiber Cable", "source": []},
+            "quantity": {"value": 12000, "source": []},
+            "unit_price": {"value": 145.0, "source": []},
+            "amount": {"value": 1914000.0, "source": []},
+        }
+    ]
+
+    result = extractor._cross_validate_line_items(items)
+
+    # Quantity should NOT be auto-corrected
+    assert result[0]["quantity"]["value"] == 12000
+
+
+def test_cross_validation_no_correction_when_valid():
+    """
+    When quantity × unit_price ≈ amount, no correction should occur.
+    """
+    extractor = InvoiceExtractor()
+
+    items = [
+        {
+            "item_code": {"value": "FIB-001", "source": []},
+            "description": {"value": "Fiber Cable", "source": []},
+            "quantity": {"value": 13200, "source": []},
+            "unit_price": {"value": 145.0, "source": []},
+            "amount": {"value": 1914000.0, "source": []},
+        }
+    ]
+
+    result = extractor._cross_validate_line_items(items)
+
+    assert result[0]["quantity"]["value"] == 13200

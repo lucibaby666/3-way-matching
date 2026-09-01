@@ -225,3 +225,262 @@ def test_matching_engine_collects_multiple_exceptions():
     assert exception_types.count(
         "PRICE_MISMATCH"
     ) == 2
+
+
+# ============================================================
+# SCENARIO 2 — QUANTITY EXCEPTION
+# FIB-001 invoice qty 13,200m vs PO 12,000m
+# Contract tolerance ±5% → max allowed 12,600m
+# ============================================================
+
+def test_scenario_2_quantity_exception():
+    contract = Contract(
+        contract_id="CON-2026-TEL-002",
+        contract_number="CON-2026-TEL-002",
+        quantity_tolerance="±5%",
+        price_tolerance="±2%",
+        line_items=[
+            LineItem(
+                item_code="FIB-001",
+                description="Single-Mode Fiber Cable",
+                quantity=12000,
+                unit="Meter",
+                unit_price=145.0,
+            )
+        ],
+    )
+
+    purchase_order = PurchaseOrder(
+        po_id="PO-2026-TEL-1002",
+        po_number="PO-2026-TEL-1002",
+        contract_reference="CON-2026-TEL-002",
+        line_items=[
+            LineItem(
+                item_code="FIB-001",
+                description="Single-Mode Fiber Cable",
+                quantity=12000,
+                unit="Meter",
+                unit_price=145.0,
+            )
+        ],
+    )
+
+    invoice = Invoice(
+        invoice_id="INV-2026-TEL-5002",
+        invoice_number="INV-2026-TEL-5002",
+        purchase_order_reference="PO-2026-TEL-1002",
+        line_items=[
+            LineItem(
+                item_code="FIB-001",
+                description="Single-Mode Fiber Cable",
+                quantity=13200,
+                unit="Meter",
+                unit_price=145.0,
+            )
+        ],
+    )
+
+    result = MatchingEngine().match(
+        contract,
+        purchase_order,
+        invoice,
+    )
+
+    assert result.status == "EXCEPTION"
+
+    quantity_exceptions = [
+        e
+        for e in result.exceptions
+        if e.type == "QUANTITY_MISMATCH"
+    ]
+    assert len(quantity_exceptions) == 1
+
+    exc = quantity_exceptions[0]
+    assert exc.item_code == "FIB-001"
+    assert exc.field == "quantity"
+    assert exc.expected == 12000
+    assert exc.actual == 13200
+    assert exc.tolerance is None
+
+
+# ============================================================
+# SCENARIO 3 — PRICE EXCEPTION
+# TWR-002 invoice rate INR 4,725 vs PO/contract INR 4,500
+# Contract tolerance ±2% → max allowed INR 4,590
+# ============================================================
+
+def test_scenario_3_price_exception():
+    contract = Contract(
+        contract_id="CON-2026-TEL-003",
+        contract_number="CON-2026-TEL-003",
+        quantity_tolerance="±5%",
+        price_tolerance="±2%",
+        line_items=[
+            LineItem(
+                item_code="TWR-002",
+                description="Telecom Tower Antenna",
+                quantity=40,
+                unit="Each",
+                unit_price=4500.0,
+            )
+        ],
+    )
+
+    purchase_order = PurchaseOrder(
+        po_id="PO-2026-TEL-1003",
+        po_number="PO-2026-TEL-1003",
+        contract_reference="CON-2026-TEL-003",
+        line_items=[
+            LineItem(
+                item_code="TWR-002",
+                description="Telecom Tower Antenna",
+                quantity=40,
+                unit="Each",
+                unit_price=4500.0,
+            )
+        ],
+    )
+
+    invoice = Invoice(
+        invoice_id="INV-2026-TEL-5003",
+        invoice_number="INV-2026-TEL-5003",
+        purchase_order_reference="PO-2026-TEL-1003",
+        line_items=[
+            LineItem(
+                item_code="TWR-002",
+                description="Telecom Tower Antenna",
+                quantity=40,
+                unit="Each",
+                unit_price=4725.0,
+            )
+        ],
+    )
+
+    result = MatchingEngine().match(
+        contract,
+        purchase_order,
+        invoice,
+    )
+
+    assert result.status == "EXCEPTION"
+
+    price_exceptions = [
+        e
+        for e in result.exceptions
+        if e.type == "PRICE_MISMATCH"
+    ]
+    assert len(price_exceptions) == 1
+
+    exc = price_exceptions[0]
+    assert exc.item_code == "TWR-002"
+    assert exc.field == "unit_price"
+    assert exc.expected == 4500.0
+    assert exc.actual == 4725.0
+    assert exc.tolerance is None
+
+
+# ============================================================
+# SCENARIO 4 — MISSING INVOICE LINE
+# OSS-003 exists on contract and PO but not on invoice
+# ============================================================
+
+def test_scenario_4_missing_invoice_line():
+    contract = Contract(
+        contract_id="CON-2026-TEL-004",
+        contract_number="CON-2026-TEL-004",
+        quantity_tolerance="±5%",
+        price_tolerance="±2%",
+        line_items=[
+            LineItem(
+                item_code="OSS-001",
+                description="Network Monitoring Software License",
+                quantity=50,
+                unit="License",
+                unit_price=32000.0,
+            ),
+            LineItem(
+                item_code="OSS-002",
+                description="Fault Management Module",
+                quantity=20,
+                unit="License",
+                unit_price=45000.0,
+            ),
+            LineItem(
+                item_code="OSS-003",
+                description="Performance Analytics Module",
+                quantity=10,
+                unit="License",
+                unit_price=58000.0,
+            ),
+        ],
+    )
+
+    purchase_order = PurchaseOrder(
+        po_id="PO-2026-TEL-1004",
+        po_number="PO-2026-TEL-1004",
+        contract_reference="CON-2026-TEL-004",
+        line_items=[
+            LineItem(
+                item_code="OSS-001",
+                description="Network Monitoring Software License",
+                quantity=50,
+                unit="License",
+                unit_price=32000.0,
+            ),
+            LineItem(
+                item_code="OSS-002",
+                description="Fault Management Module",
+                quantity=20,
+                unit="License",
+                unit_price=45000.0,
+            ),
+            LineItem(
+                item_code="OSS-003",
+                description="Performance Analytics Module",
+                quantity=10,
+                unit="License",
+                unit_price=58000.0,
+            ),
+        ],
+    )
+
+    invoice = Invoice(
+        invoice_id="INV-2026-TEL-5004",
+        invoice_number="INV-2026-TEL-5004",
+        purchase_order_reference="PO-2026-TEL-1004",
+        line_items=[
+            LineItem(
+                item_code="OSS-001",
+                description="Network Monitoring Software License",
+                quantity=50,
+                unit="License",
+                unit_price=32000.0,
+            ),
+            LineItem(
+                item_code="OSS-002",
+                description="Fault Management Module",
+                quantity=20,
+                unit="License",
+                unit_price=45000.0,
+            ),
+        ],
+    )
+
+    result = MatchingEngine().match(
+        contract,
+        purchase_order,
+        invoice,
+    )
+
+    assert result.status == "EXCEPTION"
+
+    missing_line_exceptions = [
+        e
+        for e in result.exceptions
+        if e.type == "MISSING_LINE"
+    ]
+    assert len(missing_line_exceptions) == 1
+
+    exc = missing_line_exceptions[0]
+    assert exc.item_code == "OSS-003"
+    assert exc.field == "presence"
