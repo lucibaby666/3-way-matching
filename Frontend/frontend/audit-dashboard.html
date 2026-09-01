@@ -7,9 +7,9 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    :root{--bg:#f4f6f9;--card:#fff;--primary:#2563eb;--danger:#ef4444;--success:#16a34a;--warn:#f59e0b;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--radius:10px}
+    :root{--bg:#f4f6f9;--card:#fff;--primary:#f97316;--primary-hover:#ea580c;--danger:#ef4444;--success:#16a34a;--warn:#f59e0b;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--radius:10px}
     body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-    header{background:linear-gradient(135deg,#5b3a1e,#d97706);color:#fff;padding:24px 32px;display:flex;align-items:center;gap:16px}
+    header{background:linear-gradient(135deg,#c2410c,#f97316);color:#fff;padding:24px 32px;display:flex;align-items:center;gap:16px}
     header h1{font-size:1.5rem;font-weight:600}
     header span{font-size:.85rem;opacity:.8}
     .container{max-width:1200px;margin:0 auto;padding:24px}
@@ -22,7 +22,7 @@
     btn,.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border:none;border-radius:var(--radius);font-size:.9rem;font-weight:500;cursor:pointer;transition:.2s}
     .btn-light{background:rgba(255,255,255,.15);color:#fff;text-decoration:none}
     .btn-light:hover{background:rgba(255,255,255,.25)}
-    .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{filter:brightness(1.1)}
+    .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}
     table{width:100%;border-collapse:collapse;font-size:.85rem}
     th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid var(--border);color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
     td{padding:10px 12px;border-bottom:1px solid var(--border)}
@@ -32,7 +32,8 @@
     .kpi .label{font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:.5px}
     .kpi .value{font-size:1.7rem;font-weight:700;margin-top:6px}
     .kpi .sub{font-size:.78rem;color:var(--muted);margin-top:2px}
-    .kpi.alert .value{color:var(--danger)}
+    .kpi .value{color:var(--primary)}
+.kpi.alert .value{color:var(--danger)}
     .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
     @media(max-width:900px){.chart-row{grid-template-columns:1fr}}
     .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px;font-size:.85rem;color:var(--muted)}
@@ -193,7 +194,7 @@ function renderCharts(data) {
         labels: Object.keys(breakdown).length ? Object.keys(breakdown) : ['No exceptions'],
         datasets: [{
           data: Object.keys(breakdown).length ? Object.values(breakdown) : [1],
-          backgroundColor: ['#ef4444', '#f59e0b', '#2563eb', '#7c3aed', '#0ea5e9', '#94a3b8'],
+          backgroundColor: ['#f97316', '#f59e0b', '#16a34a', '#ef4444', '#0ea5e9', '#94a3b8'],
         }],
       },
       options: { responsive: true, plugins: { legend: { position: 'bottom' } } },
@@ -203,7 +204,7 @@ function renderCharts(data) {
   // Decision outcomes bar
   const byType = data.decisions?.by_type || {};
   const order = ['APPROVE', 'REJECT', 'OVERRIDE'];
-  const colors = { APPROVE: '#16a34a', REJECT: '#ef4444', OVERRIDE: '#2563eb' };
+  const colors = { APPROVE: '#16a34a', REJECT: '#ef4444', OVERRIDE: '#f97316' };
   if (decisionsChart) decisionsChart.destroy();
   decisionsChart = new Chart(
     document.getElementById('decisionsChart').getContext('2d'),
@@ -237,7 +238,7 @@ function renderCharts(data) {
         datasets: [{
           label: 'Decisions',
           data: Object.keys(reviewers).length ? Object.values(reviewers) : [0],
-          backgroundColor: '#f59e0b',
+          backgroundColor: '#f97316',
         }],
       },
       options: {
