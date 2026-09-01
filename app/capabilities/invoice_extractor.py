@@ -143,8 +143,9 @@ class InvoiceExtractor:
                 "InvoiceTotal",
             ),
 
-            "line_items": self._extract_line_items(
-                fields.get("Items")
+            "line_items": self._resolve_line_items(
+                self._extract_line_items(fields.get("Items")),
+                result,
             ),
         }
 
@@ -352,6 +353,22 @@ class InvoiceExtractor:
             )
 
         return line_items
+
+    def _resolve_line_items(
+        self,
+        items: List[Dict[str, Any]],
+        result: Any,
+    ) -> List[Dict[str, Any]]:
+        if not self._line_items_are_merged(items):
+            return items
+
+        tables = getattr(result, "tables", None)
+        if tables:
+            rebuilt = self._extract_line_items_from_tables(tables)
+            if rebuilt:
+                return rebuilt
+
+        return items
 
     @staticmethod
     def _line_items_are_merged(items: List[Dict[str, Any]]) -> bool:
