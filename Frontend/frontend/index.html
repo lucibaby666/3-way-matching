@@ -111,10 +111,6 @@ async function logout() {
       </label>
     </div>
     <div class="controls" style="margin-top:12px">
-      <label>
-        <input type="checkbox" id="chkDiscrepancy" checked>
-        Inject demo discrepancy
-      </label>
       <button class="btn btn-primary" id="btnRun" onclick="runMatching()">
         Upload & Run
       </button>
@@ -247,14 +243,12 @@ async function runMatching() {
     }
     const upload = await uploadRes.json();
 
-    const inject = document.getElementById('chkDiscrepancy').checked;
-
     let matchRes;
     try {
       matchRes = await fetch(`${API}/api/matches`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({upload_id: upload.id, inject_discrepancy: inject}),
+        body: JSON.stringify({upload_id: upload.id}),
       });
     } catch (fetchErr) {
       throw new Error('Failed to fetch: ' + fetchErr.message);
