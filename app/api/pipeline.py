@@ -124,7 +124,6 @@ async def execute_match_run(
     def step(step_name: str, message: str) -> None:
         icons = {
             "intake": "📥 [INTAKE]",
-            "demo-discrepancy": "⚡ [DISCREPANCY]",
             "matching": "🔍 [MATCHING]",
             "smart-approval": "🧠 [SMART APPROVAL]",
             "hitl": "👤 [HUMAN IN THE LOOP]",
@@ -228,32 +227,7 @@ async def execute_match_run(
         })
 
         # --------------------------------------------------
-        # 2. DISCREPANCY INJECTION (DEMO ONLY)
-        # --------------------------------------------------
-
-        if run.inject_discrepancy and invoices:
-            invoice = invoices[0]
-
-            if not invoice.line_items:
-                raise RuntimeError(
-                    "Invoice contains no line items."
-                )
-
-            original_quantity = invoice.line_items[0].quantity
-            original_price = invoice.line_items[0].unit_price
-
-            invoice.line_items[0].quantity = round(original_quantity * 1.1, 2)
-            invoice.line_items[0].unit_price = round(original_price * 1.04, 2)
-
-            step(
-                "demo-discrepancy",
-                f"Invoice {invoice.line_items[0].item_code} "
-                f"modified for demo (qty {original_quantity} -> {invoice.line_items[0].quantity}, "
-                f"price {original_price} -> {invoice.line_items[0].unit_price}).",
-            )
-
-        # --------------------------------------------------
-        # 3. DETERMINISTIC MATCHING + EVIDENCE
+        # 2. DETERMINISTIC MATCHING + EVIDENCE
         # --------------------------------------------------
 
         step("matching", "Running deterministic matching engine.")

@@ -332,75 +332,90 @@ def create_persistence_tables():
     """Create persistence tables for sessions, runs, events, and HITL cases."""
     conn = get_db_connection()
     if not conn:
+        print("⚠️ Cannot create persistence tables: no DB connection")
         return False
     try:
         cursor = conn.cursor()
+        conn.autocommit = True
 
-        cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'upload_sessions')
-            CREATE TABLE upload_sessions (
-                upload_id NVARCHAR(100) PRIMARY KEY,
-                storage_backend NVARCHAR(50) NOT NULL DEFAULT 'local',
-                source_type NVARCHAR(50) NOT NULL DEFAULT 'upload',
-                created_at DATETIME NOT NULL DEFAULT GETDATE()
-            )
-        """)
+        tables = [
+            ("upload_sessions", """
+                CREATE TABLE upload_sessions (
+                    upload_id NVARCHAR(100) PRIMARY KEY,
+                    storage_backend NVARCHAR(50) NOT NULL DEFAULT 'local',
+                    source_type NVARCHAR(50) NOT NULL DEFAULT 'upload',
+                    created_at DATETIME NOT NULL DEFAULT GETDATE()
+                )
+            """),
+            ("match_runs", """
+                CREATE TABLE match_runs (
+                    run_id NVARCHAR(100) PRIMARY KEY,
+                    upload_id NVARCHAR(100) NOT NULL,
+                    inject_discrepancy BIT NOT NULL DEFAULT 0,
+                    status NVARCHAR(50) NOT NULL DEFAULT 'pending',
+                    error NVARCHAR(MAX),
+                    result NVARCHAR(MAX),
+                    source_type NVARCHAR(50) NOT NULL DEFAULT 'upload',
+                    documents_json NVARCHAR(MAX),
+                    created_at DATETIME NOT NULL DEFAULT GETDATE(),
+                    finished_at DATETIME
+                )
+            """),
+            ("match_run_events", """
+                CREATE TABLE match_run_events (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    run_id NVARCHAR(100) NOT NULL,
+                    event_type NVARCHAR(50) NOT NULL,
+                    event_data NVARCHAR(MAX) NOT NULL,
+                    seq INT NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT GETDATE()
+                )
+            """),
+            ("hitl_cases", """
+                CREATE TABLE hitl_cases (
+                    case_id NVARCHAR(100) PRIMARY KEY,
+                    run_id NVARCHAR(100),
+                    status NVARCHAR(50) NOT NULL DEFAULT 'PENDING',
+                    validation_result NVARCHAR(MAX),
+                    evidence NVARCHAR(MAX),
+                    reviewer NVARCHAR(100),
+                    decision_type NVARCHAR(50),
+                    decision_reason NVARCHAR(MAX),
+                    decision_comment NVARCHAR(MAX),
+                    decision_timestamp DATETIME,
+                    created_at DATETIME NOT NULL DEFAULT GETDATE()
+                )
+            """),
+        ]
 
-        cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'match_runs')
-            CREATE TABLE match_runs (
-                run_id NVARCHAR(100) PRIMARY KEY,
-                upload_id NVARCHAR(100) NOT NULL,
-                inject_discrepancy BIT NOT NULL DEFAULT 0,
-                status NVARCHAR(50) NOT NULL DEFAULT 'pending',
-                error NVARCHAR(MAX),
-                result NVARCHAR(MAX),
-                source_type NVARCHAR(50) NOT NULL DEFAULT 'upload',
-                documents_json NVARCHAR(MAX),
-                created_at DATETIME NOT NULL DEFAULT GETDATE(),
-                finished_at DATETIME
-            )
-        """)
+        for table_name, ddl in tables:
+            try:
+                cursor.execute(ddl)
+                print(f"✅ Created table: {table_name}")
+            except Exception as e:
+                if "already exists" in str(e).lower() or "table already" in str(e).lower():
+                    print(f"ℹ️ Table already exists: {table_name}")
+                else:
+                    print(f"⚠️ Table {table_name}: {e}")
 
-        cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'match_run_events')
-            CREATE TABLE match_run_events (
-                id INT IDENTITY(1,1) PRIMARY KEY,
-                run_id NVARCHAR(100) NOT NULL,
-                event_type NVARCHAR(50) NOT NULL,
-                event_data NVARCHAR(MAX) NOT NULL,
-                seq INT NOT NULL DEFAULT 0,
-                created_at DATETIME NOT NULL DEFAULT GETDATE()
-            )
-        """)
-        cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_run_events_run_id' AND object_id = OBJECT_ID('match_run_events'))
-            CREATE INDEX idx_run_events_run_id ON match_run_events(run_id)
-        """)
+        try:
+            cursor.execute("""
+                CREATE INDEX idx_run_events_run_id ON match_run_events(run_id)
+            """)
+            print("✅ Created index: idx_run_events_run_id")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                print("ℹ️ Index already exists: idx_run_events_run_id")
+            else:
+                print(f"⚠️ Index: {e}")
 
-        cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'hitl_cases')
-            CREATE TABLE hitl_cases (
-                case_id NVARCHAR(100) PRIMARY KEY,
-                run_id NVARCHAR(100),
-                status NVARCHAR(50) NOT NULL DEFAULT 'PENDING',
-                validation_result NVARCHAR(MAX),
-                evidence NVARCHAR(MAX),
-                reviewer NVARCHAR(100),
-                decision_type NVARCHAR(50),
-                decision_reason NVARCHAR(MAX),
-                decision_comment NVARCHAR(MAX),
-                decision_timestamp DATETIME,
-                created_at DATETIME NOT NULL DEFAULT GETDATE()
-            )
-        """)
-
-        conn.commit()
+        conn.autocommit = False
         conn.close()
+        print("✅ Persistence tables initialization complete")
         return True
     except Exception as e:
-        print(f"⚠️ Persistence table creation warning: {e}")
-        logger.warning(f"Persistence table creation warning: {e}")
+        print(f"⚠️ Persistence table creation error: {e}")
+        logger.warning(f"Persistence table creation error: {e}")
         if conn:
             try:
                 conn.close()
@@ -413,18 +428,20 @@ def save_upload_session(upload_id: str, storage_backend: str = "local", source_t
     """Persist an upload session record."""
     conn = get_db_connection()
     if not conn:
+        print("⚠️ save_upload_session: no DB connection")
         return False
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            IF NOT EXISTS (SELECT 1 FROM upload_sessions WHERE upload_id = ?)
             INSERT INTO upload_sessions (upload_id, storage_backend, source_type, created_at)
             VALUES (?, ?, ?, ?)
-        """, (upload_id, upload_id, storage_backend, source_type, datetime.now()))
+        """, (upload_id, storage_backend, source_type, datetime.now()))
         conn.commit()
         cursor.close()
+        print(f"✅ Persisted upload session: {upload_id}")
         return True
     except Exception as e:
+        print(f"⚠️ Failed to save upload session: {e}")
         logger.error(f"Failed to save upload session: {e}")
         return False
     finally:
@@ -441,18 +458,20 @@ def save_match_run(run_id: str, upload_id: str, inject_discrepancy: bool,
     """Persist a match run record."""
     conn = get_db_connection()
     if not conn:
+        print("⚠️ save_match_run: no DB connection")
         return False
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            IF NOT EXISTS (SELECT 1 FROM match_runs WHERE run_id = ?)
             INSERT INTO match_runs (run_id, upload_id, inject_discrepancy, status, source_type, documents_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (run_id, upload_id, inject_discrepancy, status, source_type, documents_json, datetime.now()))
         conn.commit()
         cursor.close()
+        print(f"✅ Persisted match run: {run_id}")
         return True
     except Exception as e:
+        print(f"⚠️ Failed to save match run: {e}")
         logger.error(f"Failed to save match run: {e}")
         return False
     finally:
@@ -467,6 +486,7 @@ def update_match_run_status(run_id: str, status: str, error: str = None, result:
     """Update match run status, optionally with error/result."""
     conn = get_db_connection()
     if not conn:
+        print(f"⚠️ update_match_run_status: no DB connection for {run_id}")
         return False
     try:
         cursor = conn.cursor()
@@ -477,8 +497,10 @@ def update_match_run_status(run_id: str, status: str, error: str = None, result:
         """, (status, error, result, status, run_id))
         conn.commit()
         cursor.close()
+        print(f"✅ Updated match run {run_id} -> {status}")
         return True
     except Exception as e:
+        print(f"⚠️ Failed to update match run status: {e}")
         logger.error(f"Failed to update match run status: {e}")
         return False
     finally:
@@ -504,6 +526,7 @@ def save_match_run_event(run_id: str, event_type: str, event_data: str, seq: int
         cursor.close()
         return True
     except Exception as e:
+        print(f"⚠️ Failed to save match run event: {e}")
         logger.error(f"Failed to save match run event: {e}")
         return False
     finally:

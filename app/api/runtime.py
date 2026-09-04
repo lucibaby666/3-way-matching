@@ -1,4 +1,5 @@
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -11,6 +12,8 @@ from app.repositories.azure_sql_hitl_case_repository import (
     AzureSqlHITLCaseRepository,
 )
 from app.storage.document_storage import DocumentStorage
+
+logger = logging.getLogger(__name__)
 
 
 def create_hitl_service() -> HITLCaseService:
@@ -64,8 +67,8 @@ class MatchRun:
             persistence_store.save_event(
                 self.run_id, event, seq=seq
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to persist event for run %s: %s", self.run_id, exc)
 
 
 upload_sessions: Dict[str, UploadSession] = {}
@@ -82,8 +85,8 @@ def persist_session(session: UploadSession) -> None:
             else "local",
             source_type="upload",
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to persist session %s: %s", session.upload_id, exc)
 
 
 def persist_run(run: MatchRun) -> None:
@@ -100,5 +103,5 @@ def persist_run(run: MatchRun) -> None:
             source_type=run.source_type,
             documents_json=docs_json,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to persist run %s: %s", run.run_id, exc)

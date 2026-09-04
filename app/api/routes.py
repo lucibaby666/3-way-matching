@@ -79,18 +79,16 @@ UPLOAD_FIELDS = {
 
 class CreateMatchRequest(BaseModel):
     upload_id: str
-    inject_discrepancy: bool = False
 
 
 class AzureMatchRequest(BaseModel):
-    inject_discrepancy: bool = False
     contract_locators: Optional[List[str]] = None
     po_locators: Optional[List[str]] = None
     invoice_locators: Optional[List[str]] = None
 
 
 class DemoMatchRequest(BaseModel):
-    inject_discrepancy: bool = True
+    pass
 
 
 class CreateDecisionRequest(BaseModel):
@@ -220,7 +218,7 @@ async def create_match(request: CreateMatchRequest) -> dict:
     run = MatchRun(
         run_id=uuid4().hex,
         upload_id=session.upload_id,
-        inject_discrepancy=request.inject_discrepancy,
+        inject_discrepancy=False,
     )
     persist_run(run)
 
@@ -231,7 +229,6 @@ async def create_match(request: CreateMatchRequest) -> dict:
         "match_started",
         run_id=run.run_id,
         upload_id=run.upload_id,
-        inject_discrepancy=request.inject_discrepancy,
     )
 
     return {
@@ -253,7 +250,6 @@ async def create_azure_match(
     contracts/, purchase_orders/, invoices/ folders.
     Optionally filter by providing specific locators.
     """
-    inject = request.inject_discrepancy if request else False
     contract_locs = request.contract_locators if request else None
     po_locs = request.po_locators if request else None
     inv_locs = request.invoice_locators if request else None
@@ -321,7 +317,7 @@ async def create_azure_match(
     run = MatchRun(
         run_id=uuid4().hex,
         upload_id=upload_id,
-        inject_discrepancy=inject,
+        inject_discrepancy=False,
         source_type="azure_blob",
         documents_snapshot=documents_snapshot,
     )
@@ -334,7 +330,6 @@ async def create_azure_match(
         "azure_match_started",
         run_id=run.run_id,
         upload_id=upload_id,
-        inject_discrepancy=inject,
         contract_count=len(discovered.get("contracts", [])),
         po_count=len(discovered.get("purchase_orders", [])),
         invoice_count=len(discovered.get("invoices", [])),
@@ -361,7 +356,6 @@ async def create_demo_match(
     """
     1-Click Demo matching using repository sample documents in data/.
     """
-    inject = request.inject_discrepancy if request else True
     upload_id = uuid4().hex
     storage = create_upload_session_storage()
 
@@ -391,7 +385,7 @@ async def create_demo_match(
     run = MatchRun(
         run_id=uuid4().hex,
         upload_id=upload_id,
-        inject_discrepancy=inject,
+        inject_discrepancy=False,
         source_type="demo",
     )
     persist_run(run)
@@ -402,7 +396,6 @@ async def create_demo_match(
         "match_started",
         run_id=run.run_id,
         upload_id=run.upload_id,
-        inject_discrepancy=inject,
     )
 
     return {
