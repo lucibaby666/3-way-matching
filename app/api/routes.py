@@ -255,7 +255,11 @@ async def create_azure_match(
     inv_locs = request.invoice_locators if request else None
 
     try:
-        azure_storage = create_document_storage()
+        from app.storage.azure_blob_document_storage import (
+            AzureBlobDocumentStorage,
+        )
+
+        azure_storage = AzureBlobDocumentStorage.from_env()
     except Exception as exc:
         raise HTTPException(
             status_code=503,

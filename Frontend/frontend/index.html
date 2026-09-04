@@ -185,6 +185,23 @@ async function logout() {
       </div>
     </div>
 
+    <!-- Azure Blob Storage Card -->
+    <div class="card">
+      <h2>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        Azure Blob Storage
+      </h2>
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:16px">
+        Run matching directly from files stored in Azure Blob Storage.
+      </p>
+      <div style="display:flex;justify-content:flex-end">
+        <button class="btn btn-info" id="btnAzureRun" onclick="runAzureMatching()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run from Azure Blob
+        </button>
+      </div>
+    </div>
+
     <div id="loading"><span class="spinner"></span>Running extraction &amp; matching pipeline &hellip;</div>
 
     <div id="stepsCard" class="card hidden">
@@ -445,6 +462,53 @@ async function runMatching() {
     if (!matchRes.ok) {
       const err = await matchRes.json().catch(() => ({}));
       throw new Error(err.detail || 'Failed to start matching');
+    }
+    const match = await matchRes.json();
+
+    await streamRun(match);
+  } catch (e) {
+    toast('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    loading.classList.remove('active');
+  }
+}
+
+// ============================================================
+// RUN MATCHING (AZURE BLOB)
+// ============================================================
+
+async function runAzureMatching() {
+  const btn = document.getElementById('btnAzureRun');
+  const loading = document.getElementById('loading');
+  const results = document.getElementById('results');
+  const stepsCard = document.getElementById('stepsCard');
+
+  btn.disabled = true;
+  loading.classList.add('active');
+  results.classList.add('hidden');
+  stepsCard.classList.remove('hidden');
+  document.getElementById('stepsList').innerHTML = '';
+
+  if (eventSource) {
+    try { eventSource.close(); } catch (e) {}
+    eventSource = null;
+  }
+
+  try {
+    let matchRes;
+    try {
+      matchRes = await fetch(`${API}/api/matches/azure`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({}),
+      });
+    } catch (fetchErr) {
+      throw new Error('Failed to fetch: ' + fetchErr.message);
+    }
+    if (!matchRes.ok) {
+      const err = await matchRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to start Azure matching');
     }
     const match = await matchRes.json();
 
