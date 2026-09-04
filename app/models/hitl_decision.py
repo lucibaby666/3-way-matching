@@ -29,3 +29,4 @@ class HITLDecision:
     reviewer: str
     comment: Optional[str]
     timestamp: datetime
+    reason: Optional[str] = None

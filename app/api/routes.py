@@ -16,6 +16,8 @@ from app.api.runtime import (
     UploadSession,
     hitl_service,
     match_runs,
+    persist_run,
+    persist_session,
     upload_sessions,
 )
 from app.auth.dependencies import (
@@ -28,7 +30,11 @@ from app.models.hitl_case import HITLCaseStatus
 from app.models.hitl_decision import HITLDecision, HITLDecisionType
 from app.monitoring.json_logging import log_event
 from app.monitoring.run_history import record_event
-from app.storage.factory import create_upload_session_storage
+from app.persistence.store import persistence_store
+from app.storage.factory import (
+    create_document_storage,
+    create_upload_session_storage,
+)
 try:
     from database_operations import (
         get_audit_count,
@@ -76,12 +82,20 @@ class CreateMatchRequest(BaseModel):
     inject_discrepancy: bool = False
 
 
+class AzureMatchRequest(BaseModel):
+    inject_discrepancy: bool = False
+    contract_locators: Optional[List[str]] = None
+    po_locators: Optional[List[str]] = None
+    invoice_locators: Optional[List[str]] = None
+
+
 class DemoMatchRequest(BaseModel):
     inject_discrepancy: bool = True
 
 
 class CreateDecisionRequest(BaseModel):
     decision: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
     reviewer: str = ""
     comment: str = ""
 
@@ -171,7 +185,7 @@ async def create_upload(
                 }
             )
 
-    upload_sessions[session.upload_id] = session
+    persist_session(session)
 
     log_event(
         logger,
@@ -208,7 +222,7 @@ async def create_match(request: CreateMatchRequest) -> dict:
         upload_id=session.upload_id,
         inject_discrepancy=request.inject_discrepancy,
     )
-    match_runs[run.run_id] = run
+    persist_run(run)
 
     start_match_run(run, session.storage)
 
@@ -228,6 +242,117 @@ async def create_match(request: CreateMatchRequest) -> dict:
     }
 
 
+@router.post("/matches/azure", status_code=202)
+async def create_azure_match(
+    request: Optional[AzureMatchRequest] = None,
+) -> dict:
+    """
+    Run matching directly from files in Azure Blob Storage.
+
+    Lists documents from the configured container's
+    contracts/, purchase_orders/, invoices/ folders.
+    Optionally filter by providing specific locators.
+    """
+    inject = request.inject_discrepancy if request else False
+    contract_locs = request.contract_locators if request else None
+    po_locs = request.po_locators if request else None
+    inv_locs = request.invoice_locators if request else None
+
+    try:
+        azure_storage = create_document_storage()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Azure Blob Storage is not configured: {exc}",
+        )
+
+    from app.storage.filtered_document_storage import (
+        FilteredDocumentStorage,
+    )
+
+    allowed = {}
+    if contract_locs is not None:
+        allowed["contracts"] = contract_locs
+    if po_locs is not None:
+        allowed["purchase_orders"] = po_locs
+    if inv_locs is not None:
+        allowed["invoices"] = inv_locs
+
+    if allowed:
+        storage = FilteredDocumentStorage(
+            backend=azure_storage,
+            allowed_locators=allowed,
+        )
+    else:
+        storage = azure_storage
+
+    from app.capabilities.document_intake import DocumentIntake
+    intake = DocumentIntake(storage=storage)
+    discovered = intake.discover_documents()
+
+    if not discovered.get("contracts"):
+        raise HTTPException(
+            status_code=422,
+            detail="No contract documents found in Azure Blob Storage.",
+        )
+    if not discovered.get("purchase_orders"):
+        raise HTTPException(
+            status_code=422,
+            detail="No purchase order documents found in Azure Blob Storage.",
+        )
+    if not discovered.get("invoices"):
+        raise HTTPException(
+            status_code=422,
+            detail="No invoice documents found in Azure Blob Storage.",
+        )
+
+    upload_id = uuid4().hex
+    session = UploadSession(
+        upload_id=upload_id,
+        storage=storage,
+    )
+    persist_session(session)
+
+    documents_snapshot = {
+        cat: [d.get("filename", "") for d in docs]
+        for cat, docs in discovered.items()
+    }
+
+    run = MatchRun(
+        run_id=uuid4().hex,
+        upload_id=upload_id,
+        inject_discrepancy=inject,
+        source_type="azure_blob",
+        documents_snapshot=documents_snapshot,
+    )
+    persist_run(run)
+
+    start_match_run(run, storage)
+
+    log_event(
+        logger,
+        "azure_match_started",
+        run_id=run.run_id,
+        upload_id=upload_id,
+        inject_discrepancy=inject,
+        contract_count=len(discovered.get("contracts", [])),
+        po_count=len(discovered.get("purchase_orders", [])),
+        invoice_count=len(discovered.get("invoices", [])),
+    )
+
+    return {
+        "id": run.run_id,
+        "status": run.status,
+        "upload_id": upload_id,
+        "source": "azure_blob",
+        "events_url": f"/api/matches/{run.run_id}/events",
+        "documents": {
+            cat: [d.get("filename", "") for d in docs]
+            for cat, docs in discovered.items()
+        },
+    }
+
+
 @router.post("/matches/demo", status_code=202)
 async def create_demo_match(
     request: Optional[DemoMatchRequest] = None,
@@ -238,7 +363,7 @@ async def create_demo_match(
     """
     inject = request.inject_discrepancy if request else True
     upload_id = uuid4().hex
-    storage = create_upload_session_storage(upload_id)
+    storage = create_upload_session_storage()
 
     data_dir = Path("data")
     c_path = data_dir / "contracts" / "contract_CON-2026-001.pdf"
@@ -246,11 +371,11 @@ async def create_demo_match(
     inv_path = data_dir / "invoices" / "invoice_INV-2026-001.pdf"
 
     if c_path.exists():
-        storage.write_bytes("contracts/contract_CON-2026-001.pdf", c_path.read_bytes())
+        storage.add_document("contracts", "contracts/contract_CON-2026-001.pdf", c_path.read_bytes())
     if po_path.exists():
-        storage.write_bytes("purchase_orders/po_PO-2026-001.pdf", po_path.read_bytes())
+        storage.add_document("purchase_orders", "purchase_orders/po_PO-2026-001.pdf", po_path.read_bytes())
     if inv_path.exists():
-        storage.write_bytes("invoices/invoice_INV-2026-001.pdf", inv_path.read_bytes())
+        storage.add_document("invoices", "invoices/invoice_INV-2026-001.pdf", inv_path.read_bytes())
 
     session = UploadSession(
         upload_id=upload_id,
@@ -261,15 +386,16 @@ async def create_demo_match(
             "invoices": ["invoice_INV-2026-001.pdf"],
         },
     )
-    upload_sessions[upload_id] = session
+    persist_session(session)
 
     run = MatchRun(
         run_id=uuid4().hex,
         upload_id=upload_id,
         inject_discrepancy=inject,
+        source_type="demo",
     )
-    match_runs[run.run_id] = run
-    start_match_run(run, session.storage)
+    persist_run(run)
+    start_match_run(run, storage)
 
     log_event(
         logger,
@@ -357,6 +483,42 @@ def _get_run_or_404(run_id: str) -> MatchRun:
 
 
 # ============================================================
+# RUN HISTORY (PERSISTED)
+# ============================================================
+
+
+@router.get("/runs")
+async def list_runs(limit: int = 50) -> list:
+    """List recent match runs from Azure SQL."""
+    runs = persistence_store.get_runs(limit=limit)
+    return runs
+
+
+@router.get("/runs/{run_id}")
+async def get_run_detail(run_id: str) -> dict:
+    """Get full match run detail including result payload."""
+    run = persistence_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Run not found: {run_id}",
+        )
+    if run.get("result") and isinstance(run["result"], str):
+        try:
+            run["result"] = json.loads(run["result"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return run
+
+
+@router.get("/runs/{run_id}/events")
+async def get_run_events(run_id: str) -> list:
+    """Get persisted events for a run (for replay/history)."""
+    events = persistence_store.get_events(run_id)
+    return events
+
+
+# ============================================================
 # HITL CASE DECISIONS & PRECEDENT LEARNING
 # ============================================================
 
@@ -368,6 +530,12 @@ async def create_decision(
     user: UserAccount = Depends(get_current_user),
 ) -> dict:
     reviewer = request.reviewer.strip() or user.username
+
+    if not request.reason.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="A reason is required for all HITL decisions (approve, reject, or override).",
+        )
 
     try:
         decision_type = HITLDecisionType(request.decision)
@@ -392,6 +560,7 @@ async def create_decision(
         reviewer=reviewer,
         comment=request.comment,
         timestamp=datetime.now(timezone.utc),
+        reason=request.reason.strip(),
     )
 
     # Extract exceptions from validation_result
@@ -416,7 +585,7 @@ async def create_decision(
                 detail=str(error),
             )
 
-    # ⭐ Store human decision as precedent in ChromaDB for future auto-approval
+    # Store human decision as precedent in ChromaDB for future auto-approval
     smart_approval = get_smart_approval_system()
     precedents_stored = []
     for exc in exceptions:
@@ -443,7 +612,7 @@ async def create_decision(
             "event_type": f"HITL_DECISION_{decision_type.value}",
             "severity": "INFO",
             "user": reviewer,
-            "action": f"Reviewer submitted {decision_type.value} for case {reviewed_case.case_id}",
+            "action": f"Reviewer submitted {decision_type.value} for case {reviewed_case.case_id}. Reason: {request.reason}",
             "resource": reviewed_case.case_id,
             "resource_type": "HITL_CASE",
             "status": "SUCCESS",
@@ -451,6 +620,7 @@ async def create_decision(
             "metadata": {
                 "case_id": reviewed_case.case_id,
                 "decision": decision_type.value,
+                "reason": request.reason,
                 "comment": request.comment,
                 "precedents_learned": len(precedents_stored)
             }
@@ -464,6 +634,7 @@ async def create_decision(
             "case_id": reviewed_case.case_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "decision": decision_type.value,
+            "reason": request.reason,
             "reviewer": reviewer,
             "precedents_stored": len(precedents_stored),
         }
@@ -475,6 +646,7 @@ async def create_decision(
         case_id=reviewed_case.case_id,
         decision=decision_type.value,
         reviewer=reviewer,
+        reason=request.reason,
         precedents_stored=len(precedents_stored),
     )
 
@@ -488,8 +660,9 @@ async def create_decision(
         "case_id": reviewed_case.case_id,
         "status": reviewed_case.status.value,
         "decision": decision_val,
+        "reason": request.reason,
         "reviewer": reviewed_case.reviewer or reviewer,
         "comment": request.comment,
         "precedent_learned": True,
         "chromadb_vectors": smart_approval.get_stats().get("chromadb_vectors", 0),
-    }
+    }

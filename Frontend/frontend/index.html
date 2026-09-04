@@ -6,7 +6,7 @@
 <title>3-Way Matching</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#f4f6f9;--card:#fff;--primary:#f97316;--primary-hover:#ea580c;--danger:#ef4444;--success:#16a34a;--warn:#f59e0b;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--radius:10px}
+:root{--bg:#f4f6f9;--card:#fff;--primary:#f97316;--primary-hover:#ea580c;--danger:#ef4444;--success:#16a34a;--warn:#f59e0b;--info:#3b82f6;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--radius:10px}
 body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 header{background:linear-gradient(135deg,#c2410c,#f97316);color:#fff;padding:24px 32px;display:flex;align-items:center;gap:16px}
 header h1{font-size:1.5rem;font-weight:600}
@@ -19,16 +19,24 @@ header span{font-size:.85rem;opacity:.8}
 .badge-exception{background:#fee2e2;color:#991b1b}
 .badge-pending{background:#fef3c7;color:#92400e}
 .badge-reviewed{background:#dbeafe;color:#1e40af}
-btn,.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border:none;border-radius:var(--radius);font-size:.9rem;font-weight:500;cursor:pointer;transition:.2s}
+.badge-completed{background:#dcfce7;color:#166534}
+.badge-failed{background:#fee2e2;color:#991b1b}
+.badge-running{background:#e0e7ff;color:#3730a3}
+.btn,.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border:none;border-radius:var(--radius);font-size:.9rem;font-weight:500;cursor:pointer;transition:.2s}
 .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}
 .btn-success{background:var(--success);color:#fff}.btn-success:hover{background:#15803d}
 .btn-danger{background:var(--danger);color:#fff}.btn-danger:hover{background:#dc2626}
 .btn-warn{background:var(--warn);color:#fff}.btn-warn:hover{background:#d97706}
+.btn-info{background:var(--info);color:#fff}.btn-info:hover{background:#2563eb}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-outline:hover{background:#f1f5f9}
 .btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-sm{padding:6px 14px;font-size:.8rem}
 table{width:100%;border-collapse:collapse;font-size:.85rem}
 th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid var(--border);color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
 td{padding:10px 12px;border-bottom:1px solid var(--border)}
 tr:last-child td{border-bottom:none}
+tr.clickable{cursor:pointer}
+tr.clickable:hover{background:#f8fafc}
 .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .controls label{font-size:.85rem;color:var(--muted);display:flex;align-items:center;gap:6px}
 .controls input[type=checkbox]{accent-color:var(--primary);width:16px;height:16px}
@@ -51,6 +59,18 @@ tr:last-child td{border-bottom:none}
 .doc-item .value{font-size:.95rem;font-weight:500}
 .toast{position:fixed;bottom:24px;right:24px;background:#1e293b;color:#fff;padding:12px 20px;border-radius:8px;font-size:.9rem;z-index:999;opacity:0;transition:opacity .3s}
 .toast.show{opacity:1}
+.tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:20px}
+.tab{padding:10px 20px;cursor:pointer;font-size:.9rem;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:.2s}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.tab:hover{color:var(--text)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:.9rem;resize:vertical;min-height:60px;font-family:inherit}
+textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(249,115,22,.1)}
+.input-group{margin-bottom:12px}
+.input-group label{display:block;font-size:.85rem;font-weight:500;margin-bottom:4px;color:var(--text)}
+.input-group .required::after{content:" *";color:var(--danger)}
+.run-row-meta{font-size:.8rem;color:var(--muted);margin-top:2px}
 </style>
 </head>
 <body>
@@ -93,78 +113,166 @@ async function logout() {
 
 <div class="container">
 
-  <!-- Run Controls -->
-  <div class="card">
-    <h2>Upload & Run</h2>
-    <div class="controls" style="align-items:flex-start">
-      <label style="flex-direction:column;align-items:flex-start">
-        <span>Contract PDFs</span>
-        <input type="file" id="contractFile" accept=".pdf" multiple>
-      </label>
-      <label style="flex-direction:column;align-items:flex-start">
-        <span>Purchase Order PDFs</span>
-        <input type="file" id="poFile" accept=".pdf" multiple>
-      </label>
-      <label style="flex-direction:column;align-items:flex-start">
-        <span>Invoice PDFs</span>
-        <input type="file" id="invoiceFile" accept=".pdf" multiple>
-      </label>
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('run')">Run Matching</div>
+    <div class="tab" onclick="switchTab('history')">Run History</div>
+  </div>
+
+  <!-- TAB: Run Matching -->
+  <div id="tab-run" class="tab-content active">
+
+    <!-- Source Mode Toggle -->
+    <div class="card">
+      <h2>Run Matching</h2>
+      <div class="controls" style="margin-bottom:16px">
+        <button class="btn btn-outline btn-sm" id="modeUpload" onclick="setMode('upload')" style="font-weight:600">Upload Files</button>
+        <button class="btn btn-outline btn-sm" id="modeAzure" onclick="setMode('azure')">Fetch from Azure Blob</button>
+      </div>
+
+      <!-- Upload Mode -->
+      <div id="uploadMode">
+        <div class="controls" style="align-items:flex-start">
+          <label style="flex-direction:column;align-items:flex-start">
+            <span>Contract PDFs</span>
+            <input type="file" id="contractFile" accept=".pdf" multiple>
+          </label>
+          <label style="flex-direction:column;align-items:flex-start">
+            <span>Purchase Order PDFs</span>
+            <input type="file" id="poFile" accept=".pdf" multiple>
+          </label>
+          <label style="flex-direction:column;align-items:flex-start">
+            <span>Invoice PDFs</span>
+            <input type="file" id="invoiceFile" accept=".pdf" multiple>
+          </label>
+        </div>
+        <div class="controls" style="margin-top:12px">
+          <button class="btn btn-primary" id="btnRun" onclick="runMatching()">
+            Upload & Run
+          </button>
+        </div>
+      </div>
+
+      <!-- Azure Mode -->
+      <div id="azureMode" class="hidden">
+        <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+          Fetches all PDFs from the configured Azure Blob Storage container's
+          <code>contracts/</code>, <code>purchase_orders/</code>, and <code>invoices/</code> folders.
+        </p>
+        <div class="controls" style="margin-top:12px">
+          <label style="font-size:.85rem;color:var(--muted);display:flex;align-items:center;gap:6px">
+            <input type="checkbox" id="azureInject" checked> Inject demo discrepancy
+          </label>
+          <button class="btn btn-primary" id="btnAzureRun" onclick="runAzureMatching()">
+            Fetch & Run
+          </button>
+        </div>
+      </div>
     </div>
-    <div class="controls" style="margin-top:12px">
-      <button class="btn btn-primary" id="btnRun" onclick="runMatching()">
-        Upload & Run
-      </button>
+
+    <div id="loading"><span class="spinner"></span>Running extraction &amp; matching pipeline &hellip;</div>
+
+    <div id="stepsCard" class="card hidden">
+      <h2>Pipeline Steps</h2>
+      <div id="stepsList" style="font-size:.95rem;color:var(--muted);line-height:1.7"></div>
+    </div>
+
+    <!-- Results section -->
+    <div id="results" class="hidden">
+
+      <!-- Documents -->
+      <div class="card">
+        <h2>Documents</h2>
+        <div class="doc-grid" id="docGrid"></div>
+      </div>
+
+      <!-- Line Items -->
+      <div class="card">
+        <h2>Line Items Comparison</h2>
+        <div style="overflow-x:auto">
+          <table id="lineTable">
+            <thead>
+              <tr>
+                <th>Source</th><th>Item Code</th><th>Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Matching Result -->
+      <div class="card">
+        <h2>Matching Result <span id="statusBadge"></span></h2>
+        <div id="exceptionsArea"></div>
+        <p id="noExceptions" class="hidden" style="color:var(--success);font-weight:500">All documents match — no exceptions found.</p>
+      </div>
+
+      <!-- HITL Review -->
+      <div class="card hidden" id="hitlCard">
+        <h2>Human-in-the-Loop Review</h2>
+        <div class="status-bar" id="hitlStatus"></div>
+        <div class="input-group" style="margin-top:16px">
+          <label class="required">Reason for decision</label>
+          <textarea id="hitlReason" placeholder="Explain why you are approving, rejecting, or overriding this exception..." rows="3"></textarea>
+        </div>
+        <div class="input-group">
+          <label>Additional comment (optional)</label>
+          <textarea id="hitlComment" placeholder="Optional additional notes..." rows="2"></textarea>
+        </div>
+        <div class="hitl-actions" id="hitlActions">
+          <button class="btn btn-success" onclick="submitDecision('APPROVE')">Approve</button>
+          <button class="btn btn-danger" onclick="submitDecision('REJECT')">Reject</button>
+          <button class="btn btn-warn" onclick="submitDecision('OVERRIDE')">Override</button>
+        </div>
+        <div id="hitlResult" class="hidden" style="margin-top:14px"></div>
+      </div>
     </div>
   </div>
 
-  <div id="loading"><span class="spinner"></span>Running extraction &amp; matching pipeline &hellip;</div>
-
-  <div id="stepsCard" class="card hidden">
-    <h2>Pipeline Steps</h2>
-    <div id="stepsList" style="font-size:.95rem;color:var(--muted);line-height:1.7"></div>
-  </div>
-
-  <!-- Results section -->
-  <div id="results" class="hidden">
-
-    <!-- Documents -->
+  <!-- TAB: Run History -->
+  <div id="tab-history" class="tab-content">
     <div class="card">
-      <h2>Documents</h2>
-      <div class="doc-grid" id="docGrid"></div>
-    </div>
-
-    <!-- Line Items -->
-    <div class="card">
-      <h2>Line Items Comparison</h2>
+      <h2>Run History</h2>
+      <div style="margin-bottom:12px">
+        <button class="btn btn-outline btn-sm" onclick="loadRunHistory()">Refresh</button>
+      </div>
       <div style="overflow-x:auto">
-        <table id="lineTable">
+        <table id="runHistoryTable">
           <thead>
             <tr>
-              <th>Source</th><th>Item Code</th><th>Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th>
+              <th>Run ID</th>
+              <th>Source</th>
+              <th>Status</th>
+              <th>HITL Cases</th>
+              <th>Created</th>
+              <th>Finished</th>
+              <th></th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
+      <p id="noRuns" class="hidden" style="color:var(--muted);padding:20px;text-align:center">No runs found.</p>
     </div>
 
-    <!-- Matching Result -->
-    <div class="card">
-      <h2>Matching Result <span id="statusBadge"></span></h2>
-      <div id="exceptionsArea"></div>
-      <p id="noExceptions" class="hidden" style="color:var(--success);font-weight:500">All documents match — no exceptions found.</p>
-    </div>
+    <!-- Run Detail (hidden until a run is selected) -->
+    <div id="runDetailCard" class="card hidden">
+      <h2>
+        Run Detail <span id="runDetailBadge"></span>
+        <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="document.getElementById('runDetailCard').classList.add('hidden')">Close</button>
+      </h2>
+      <div class="status-bar" id="runDetailMeta" style="margin-bottom:16px"></div>
 
-    <!-- HITL Review -->
-    <div class="card hidden" id="hitlCard">
-      <h2>Human-in-the-Loop Review</h2>
-      <div class="status-bar" id="hitlStatus"></div>
-      <div class="hitl-actions" id="hitlActions">
-        <button class="btn btn-success" onclick="submitDecision('APPROVE')">Approve</button>
-        <button class="btn btn-danger" onclick="submitDecision('REJECT')">Reject</button>
-        <button class="btn btn-warn" onclick="submitDecision('OVERRIDE')">Override</button>
-      </div>
-      <div id="hitlResult" class="hidden" style="margin-top:14px"></div>
+      <h3 style="font-size:.95rem;margin-bottom:10px">Documents</h3>
+      <div class="doc-grid" id="runDetailDocs" style="margin-bottom:20px"></div>
+
+      <h3 style="font-size:.95rem;margin-bottom:10px">Exceptions</h3>
+      <div id="runDetailExceptions"></div>
+      <p id="runNoExceptions" class="hidden" style="color:var(--success);font-weight:500">No exceptions.</p>
+
+      <h3 style="font-size:.95rem;margin:20px 0 10px">Pipeline Steps</h3>
+      <div id="runDetailSteps" style="font-size:.9rem;color:var(--muted);line-height:1.7"></div>
     </div>
   </div>
 </div>
@@ -175,6 +283,7 @@ async function logout() {
 const API = '';
 let lastResult = null;
 let eventSource = null;
+let currentMode = 'upload';
 
 function escapeHtml(unsafe) {
   return String(unsafe)
@@ -183,6 +292,13 @@ function escapeHtml(unsafe) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  if (isNaN(dt)) return d;
+  return dt.toLocaleString();
 }
 
 function appendStep(step, message) {
@@ -196,6 +312,35 @@ function toast(msg) {
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3000);
 }
+
+// ============================================================
+// TAB SWITCHING
+// ============================================================
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById(`tab-${name}`).classList.add('active');
+  if (name === 'history') loadRunHistory();
+}
+
+// ============================================================
+// MODE TOGGLE
+// ============================================================
+
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('modeUpload').style.fontWeight = mode === 'upload' ? '600' : '400';
+  document.getElementById('modeUpload').className = mode === 'upload' ? 'btn btn-outline btn-sm' : 'btn btn-outline btn-sm';
+  document.getElementById('modeAzure').style.fontWeight = mode === 'azure' ? '600' : '400';
+  document.getElementById('uploadMode').classList.toggle('hidden', mode !== 'upload');
+  document.getElementById('azureMode').classList.toggle('hidden', mode !== 'azure');
+}
+
+// ============================================================
+// RUN MATCHING (UPLOAD)
+// ============================================================
 
 async function runMatching() {
   const btn = document.getElementById('btnRun');
@@ -230,10 +375,7 @@ async function runMatching() {
 
     let uploadRes;
     try {
-      uploadRes = await fetch(`${API}/api/uploads`, {
-        method: 'POST',
-        body: form,
-      });
+      uploadRes = await fetch(`${API}/api/uploads`, { method: 'POST', body: form });
     } catch (fetchErr) {
       throw new Error('Failed to fetch: ' + fetchErr.message);
     }
@@ -259,55 +401,119 @@ async function runMatching() {
     }
     const match = await matchRes.json();
 
-    await new Promise((resolve, reject) => {
-      const url = `${API}${match.events_url}`;
-      eventSource = new EventSource(url);
-      let finished = false;
-
-      eventSource.onmessage = (event) => {
-        let msg;
-        try { msg = JSON.parse(event.data); } catch (e) { return; }
-
-        if (msg.type === 'step') {
-          appendStep(msg.step, msg.message);
-          return;
-        }
-
-        if (msg.type === 'done') {
-          finished = true;
-          try { eventSource.close(); } catch (e) {}
-          eventSource = null;
-          lastResult = msg.payload;
-          renderResult(lastResult);
-          results.classList.remove('hidden');
-          resolve();
-          return;
-        }
-
-        if (msg.type === 'error') {
-          finished = true;
-          try { eventSource.close(); } catch (e) {}
-          eventSource = null;
-          reject(new Error(msg.message || 'Matching failed'));
-        }
-      };
-
-      eventSource.onerror = () => {
-        if (finished) return;
-        finished = true;
-        try { eventSource.close(); } catch (e) {}
-        eventSource = null;
-        reject(new Error('Connection error while streaming progress. Try again.'));
-      };
-    });
+    await streamRun(match);
   } catch (e) {
     toast('Error: ' + e.message);
   } finally {
     btn.disabled = false;
     loading.classList.remove('active');
-    // Keep steps visible so the user can see where it failed.
   }
 }
+
+// ============================================================
+// RUN MATCHING (AZURE BLOB)
+// ============================================================
+
+async function runAzureMatching() {
+  const btn = document.getElementById('btnAzureRun');
+  const loading = document.getElementById('loading');
+  const results = document.getElementById('results');
+  const stepsCard = document.getElementById('stepsCard');
+
+  btn.disabled = true;
+  loading.classList.add('active');
+  results.classList.add('hidden');
+  stepsCard.classList.remove('hidden');
+  document.getElementById('stepsList').innerHTML = '';
+
+  if (eventSource) {
+    try { eventSource.close(); } catch (e) {}
+    eventSource = null;
+  }
+
+  try {
+    const inject = document.getElementById('azureInject').checked;
+
+    let matchRes;
+    try {
+      matchRes = await fetch(`${API}/api/matches/azure`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({inject_discrepancy: inject}),
+      });
+    } catch (fetchErr) {
+      throw new Error('Failed to connect: ' + fetchErr.message);
+    }
+    if (!matchRes.ok) {
+      const err = await matchRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to start Azure matching');
+    }
+    const match = await matchRes.json();
+
+    appendStep('source', `Fetching from Azure Blob Storage (${match.documents ? Object.values(match.documents).flat().length : 0} documents)`);
+
+    await streamRun(match);
+  } catch (e) {
+    toast('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    loading.classList.remove('active');
+  }
+}
+
+// ============================================================
+// SHARED STREAMING
+// ============================================================
+
+async function streamRun(match) {
+  const results = document.getElementById('results');
+
+  return new Promise((resolve, reject) => {
+    const url = `${API}${match.events_url}`;
+    eventSource = new EventSource(url);
+    let finished = false;
+
+    eventSource.onmessage = (event) => {
+      let msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+
+      if (msg.type === 'step') {
+        appendStep(msg.step, msg.message);
+        return;
+      }
+
+      if (msg.type === 'done') {
+        finished = true;
+        try { eventSource.close(); } catch (e) {}
+        eventSource = null;
+        lastResult = msg.payload;
+        renderResult(lastResult);
+        results.classList.remove('hidden');
+        resolve();
+        return;
+      }
+
+      if (msg.type === 'error') {
+        finished = true;
+        try { eventSource.close(); } catch (e) {}
+        eventSource = null;
+        reject(new Error(msg.message || 'Matching failed'));
+      }
+    };
+
+    eventSource.onerror = () => {
+      if (finished) return;
+      finished = true;
+      try { eventSource.close(); } catch (e) {}
+      eventSource = null;
+      reject(new Error('Connection error while streaming progress. Try again.'));
+    };
+  });
+}
+
+// ============================================================
+// RENDER LIVE RESULT
+// ============================================================
 
 function renderResult(data) {
   // Documents
@@ -343,50 +549,24 @@ function renderResult(data) {
 
   // Status badge
   const badge = document.getElementById('statusBadge');
-  if (data.status === 'PASS') {
+  if (data.status === 'PASS' || data.status === 'AUTO_APPROVED') {
     badge.className = 'badge badge-pass';
-    badge.textContent = 'PASS';
+    badge.textContent = data.status;
   } else {
     badge.className = 'badge badge-exception';
     badge.textContent = 'EXCEPTION';
   }
 
   // Exceptions
-  const area = document.getElementById('exceptionsArea');
-  const noExc = document.getElementById('noExceptions');
-  area.innerHTML = '';
-  if (!data.exceptions.length) {
-    noExc.classList.remove('hidden');
-  } else {
-    noExc.classList.add('hidden');
-    for (const exc of data.exceptions) {
-      let evidenceHtml = '';
-      if (exc.evidence) {
-        for (const ev of exc.evidence) {
-          if (ev.snip_url) {
-            evidenceHtml += `<img src="${ev.snip_url}" class="evidence-img" alt="Evidence">`;
-          }
-        }
-      }
-      area.innerHTML += `<div class="exc-card">
-        <div class="exc-title">${exc.type}</div>
-        <div class="exc-detail">
-          <strong>Item:</strong> ${exc.item_code || 'N/A'} &nbsp;
-          <strong>Field:</strong> ${exc.field || 'N/A'}<br>
-          <strong>Expected:</strong> ${exc.expected} &nbsp;
-          <strong>Actual:</strong> ${exc.actual}
-          ${exc.tolerance ? `&nbsp; <strong>Tolerance:</strong> ${exc.tolerance}` : ''}
-        </div>
-        ${evidenceHtml}
-      </div>`;
-    }
-  }
+  renderExceptions(data.exceptions, 'exceptionsArea', 'noExceptions');
 
   // HITL card
   const hitlCard = document.getElementById('hitlCard');
   const hitlActions = document.getElementById('hitlActions');
   const hitlResult = document.getElementById('hitlResult');
   hitlResult.classList.add('hidden');
+  document.getElementById('hitlReason').value = '';
+  document.getElementById('hitlComment').value = '';
 
   if (data.hitl_case) {
     hitlCard.classList.remove('hidden');
@@ -401,15 +581,65 @@ function renderResult(data) {
   }
 }
 
+function renderExceptions(exceptions, areaId, noExcId) {
+  const area = document.getElementById(areaId);
+  const noExc = document.getElementById(noExcId);
+  area.innerHTML = '';
+  if (!exceptions || !exceptions.length) {
+    noExc.classList.remove('hidden');
+  } else {
+    noExc.classList.add('hidden');
+    for (const exc of exceptions) {
+      let evidenceHtml = '';
+      if (exc.evidence) {
+        for (const ev of exc.evidence) {
+          if (ev.snip_url) {
+            evidenceHtml += `<img src="${ev.snip_url}" class="evidence-img" alt="Evidence">`;
+          }
+        }
+      }
+      let autoHtml = '';
+      if (exc.auto_approved) {
+        autoHtml = `<span class="badge badge-pass" style="margin-left:8px">Auto-Approved (${exc.similarity_score ? Math.round(exc.similarity_score * 100) + '%' : ''})</span>`;
+      }
+      area.innerHTML += `<div class="exc-card">
+        <div class="exc-title">${exc.type}${autoHtml}</div>
+        <div class="exc-detail">
+          <strong>Item:</strong> ${exc.item_code || 'N/A'} &nbsp;
+          <strong>Field:</strong> ${exc.field || 'N/A'}<br>
+          <strong>Expected:</strong> ${exc.expected} &nbsp;
+          <strong>Actual:</strong> ${exc.actual}
+          ${exc.tolerance ? `&nbsp; <strong>Tolerance:</strong> ${exc.tolerance}` : ''}
+          ${exc.auto_approved ? ` &nbsp; <strong>Decision:</strong> ${exc.decision || 'N/A'} by ${exc.reviewer || 'N/A'}` : ''}
+          ${exc.comment ? `<br><strong>Comment:</strong> ${exc.comment}` : ''}
+        </div>
+        ${evidenceHtml}
+      </div>`;
+    }
+  }
+}
+
+// ============================================================
+// HITL DECISION
+// ============================================================
+
 async function submitDecision(decision) {
   if (!lastResult?.hitl_case) return;
   const caseId = lastResult.hitl_case.case_id;
+  const reason = document.getElementById('hitlReason').value.trim();
+  const comment = document.getElementById('hitlComment').value.trim();
+
+  if (!reason) {
+    toast('Please provide a reason for your decision.');
+    document.getElementById('hitlReason').focus();
+    return;
+  }
 
   try {
     const res = await fetch(`${API}/api/cases/${caseId}/decisions`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({decision, comment: `${decision} via web UI`}),
+      body: JSON.stringify({decision, reason, comment}),
     });
     if (!res.ok) {
       const err = await res.json();
@@ -418,16 +648,148 @@ async function submitDecision(decision) {
     const result = await res.json();
 
     document.getElementById('hitlActions').classList.add('hidden');
+    document.getElementById('hitlReason').disabled = true;
+    document.getElementById('hitlComment').disabled = true;
     const hitlResult = document.getElementById('hitlResult');
     hitlResult.classList.remove('hidden');
     const badgeCls = result.status === 'REVIEWED' ? 'badge-reviewed' : 'badge-pending';
     hitlResult.innerHTML = `
       <span class="badge ${badgeCls}">${result.status}</span>
-      <span style="margin-left:8px;font-size:.9rem">Decision: <strong>${result.decision}</strong> by ${result.reviewer}</span>
+      <span style="margin-left:8px;font-size:.9rem">
+        Decision: <strong>${result.decision}</strong> by ${result.reviewer}<br>
+        <strong>Reason:</strong> ${escapeHtml(result.reason)}
+      </span>
     `;
     toast('Decision submitted successfully');
   } catch (e) {
     toast('Error: ' + e.message);
+  }
+}
+
+// ============================================================
+// RUN HISTORY
+// ============================================================
+
+async function loadRunHistory() {
+  const tbody = document.querySelector('#runHistoryTable tbody');
+  const noRuns = document.getElementById('noRuns');
+  tbody.innerHTML = '';
+  noRuns.classList.add('hidden');
+
+  try {
+    const res = await fetch(`${API}/api/runs?limit=50`);
+    if (!res.ok) throw new Error('Failed to load run history');
+    const runs = await res.json();
+
+    if (!runs.length) {
+      noRuns.classList.remove('hidden');
+      return;
+    }
+
+    for (const run of runs) {
+      const statusCls = {
+        completed: 'badge-completed',
+        failed: 'badge-failed',
+        running: 'badge-running',
+        pending: 'badge-pending',
+      }[run.status] || 'badge-pending';
+
+      tbody.innerHTML += `<tr class="clickable" onclick="loadRunDetail('${run.run_id}')">
+        <td style="font-family:monospace;font-size:.8rem">${run.run_id.substring(0, 12)}...</td>
+        <td>${run.source_type || 'upload'}</td>
+        <td><span class="badge ${statusCls}">${run.status}</span></td>
+        <td>${run.hitl_case_count || 0}</td>
+        <td style="font-size:.8rem">${formatDate(run.created_at)}</td>
+        <td style="font-size:.8rem">${formatDate(run.finished_at)}</td>
+        <td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();loadRunDetail('${run.run_id}')">View</button></td>
+      </tr>`;
+    }
+  } catch (e) {
+    toast('Error loading history: ' + e.message);
+  }
+}
+
+async function loadRunDetail(runId) {
+  const card = document.getElementById('runDetailCard');
+  card.classList.remove('hidden');
+  document.getElementById('runDetailDocs').innerHTML = '';
+  document.getElementById('runDetailExceptions').innerHTML = '';
+  document.getElementById('runDetailSteps').innerHTML = '';
+  document.getElementById('runNoExceptions').classList.add('hidden');
+
+  try {
+    const [runRes, eventsRes] = await Promise.all([
+      fetch(`${API}/api/runs/${runId}`),
+      fetch(`${API}/api/runs/${runId}/events`),
+    ]);
+
+    if (!runRes.ok) throw new Error('Run not found');
+    const run = await runRes.json();
+    const events = eventsRes.ok ? await eventsRes.json() : [];
+
+    // Badge
+    const badge = document.getElementById('runDetailBadge');
+    const statusCls = {
+      completed: 'badge-completed',
+      failed: 'badge-failed',
+      running: 'badge-running',
+      pending: 'badge-pending',
+    }[run.status] || 'badge-pending';
+    badge.className = `badge ${statusCls}`;
+    badge.textContent = run.status;
+
+    // Meta
+    document.getElementById('runDetailMeta').innerHTML = `
+      <div class="item"><strong>Run ID:</strong> ${run.run_id}</div>
+      <div class="item"><strong>Source:</strong> ${run.source_type || 'upload'}</div>
+      <div class="item"><strong>Created:</strong> ${formatDate(run.created_at)}</div>
+      <div class="item"><strong>Finished:</strong> ${formatDate(run.finished_at)}</div>
+    `;
+
+    // Parse result if it's a string
+    let result = run.result;
+    if (typeof result === 'string') {
+      try { result = JSON.parse(result); } catch(e) { result = null; }
+    }
+
+    // Documents
+    if (result && result.documents) {
+      const grid = document.getElementById('runDetailDocs');
+      for (const [key, doc] of Object.entries(result.documents)) {
+        grid.innerHTML += `<div class="doc-item">
+          <div class="label">${key.replace('_', ' ')}</div>
+          <div class="value">${doc.number || 'N/A'}</div>
+          <div style="font-size:.8rem;color:var(--muted);margin-top:4px">${doc.filename || ''}</div>
+        </div>`;
+      }
+    }
+
+    // Exceptions
+    if (result && result.exceptions) {
+      renderExceptions(result.exceptions, 'runDetailExceptions', 'runNoExceptions');
+    } else {
+      document.getElementById('runNoExceptions').classList.remove('hidden');
+    }
+
+    // Steps from events
+    const stepsDiv = document.getElementById('runDetailSteps');
+    const stepEvents = events.filter(e => e.type === 'step');
+    if (stepEvents.length) {
+      for (const ev of stepEvents) {
+        stepsDiv.innerHTML += `<div><strong>${escapeHtml(ev.step || '')}:</strong> ${escapeHtml(ev.message || '')}</div>`;
+      }
+    } else {
+      stepsDiv.innerHTML = '<div style="color:var(--muted)">No step events recorded.</div>';
+    }
+
+    // Error
+    if (run.error) {
+      stepsDiv.innerHTML += `<div style="color:var(--danger);margin-top:8px"><strong>Error:</strong> ${escapeHtml(run.error)}</div>`;
+    }
+
+    card.scrollIntoView({behavior: 'smooth', block: 'start'});
+  } catch (e) {
+    toast('Error loading run detail: ' + e.message);
   }
 }
 </script>

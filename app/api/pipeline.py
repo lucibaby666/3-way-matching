@@ -10,6 +10,7 @@ from app.api.runtime import MatchRun
 from app.capabilities.document_set_loader import (
     DocumentSetLoader,
 )
+from app.persistence.store import persistence_store
 from app.capabilities.document_snip import DocumentSnip
 from app.capabilities.evidence_generator import (
     EvidenceGenerator,
@@ -460,6 +461,14 @@ async def execute_match_run(
 
         run.result = payload
         run.emit({"type": "done", "payload": payload})
+
+        try:
+            persistence_store.update_run_status(
+                run.run_id, "completed", result=payload
+            )
+        except Exception:
+            pass
+
         _record_run(
             run=run,
             started_at=started_at,
@@ -575,6 +584,15 @@ async def execute_match_run(
                 "message": str(error) or error.__class__.__name__,
             }
         )
+
+        try:
+            persistence_store.update_run_status(
+                run.run_id, "failed",
+                error=str(error) or error.__class__.__name__,
+            )
+        except Exception:
+            pass
+
         _record_run(
             run=run,
             started_at=started_at,

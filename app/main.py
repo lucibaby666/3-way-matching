@@ -38,10 +38,15 @@ async def startup_event():
     Path("logs").mkdir(parents=True, exist_ok=True)
     Path("outputs").mkdir(parents=True, exist_ok=True)
     try:
-        from database_operations import create_audit_tables, verify_database_connection
+        from database_operations import (
+            create_audit_tables,
+            create_persistence_tables,
+            verify_database_connection,
+        )
         connected, msg = verify_database_connection()
         if connected:
             create_audit_tables()
+            create_persistence_tables()
     except Exception:
         pass
 

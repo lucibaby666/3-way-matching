@@ -166,7 +166,7 @@ def test_decision_reviewer_defaults_to_authenticated_user(
 
     response = client.post(
         "/api/cases/does-not-exist/decisions",
-        json={"decision": "APPROVE", "comment": ""},
+        json={"decision": "APPROVE", "reason": "Test approval reason", "comment": ""},
     )
 
     assert response.status_code == 404
